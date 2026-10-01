@@ -1,0 +1,455 @@
+import 'dart:async';
+
+import 'package:easy_debounce/easy_throttle.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
+import 'package:get/get.dart';
+import 'package:pilipala/common/skeleton/video_reply.dart';
+import 'package:pilipala/common/widgets/http_error.dart';
+import 'package:pilipala/models/common/reply_type.dart';
+import 'package:pilipala/models/dynamics/result.dart';
+import 'package:pilipala/pages/dynamics/detail/index.dart';
+import 'package:pilipala/pages/dynamics/widgets/author_panel.dart';
+import 'package:pilipala/pages/video/detail/reply/widgets/reply_item.dart';
+import 'package:pilipala/pages/video/detail/reply_new/index.dart';
+import 'package:pilipala/pages/video/detail/reply_reply/index.dart';
+import 'package:pilipala/utils/feed_back.dart';
+import 'package:pilipala/utils/id_utils.dart';
+
+import '../../../models/video/reply/item.dart';
+import '../widgets/dynamic_panel.dart';
+
+class DynamicDetailPage extends StatefulWidget {
+  // const DynamicDetailPage({super.key});
+  const DynamicDetailPage({Key? key}) : super(key: key);
+
+  @override
+  State<DynamicDetailPage> createState() => _DynamicDetailPageState();
+}
+
+class _DynamicDetailPageState extends State<DynamicDetailPage>
+    with TickerProviderStateMixin {
+  late DynamicDetailController _dynamicDetailController;
+  late AnimationController fabAnimationCtr;
+  Future? _futureBuilderFuture;
+  late StreamController<bool> titleStreamC =
+      StreamController<bool>.broadcast(); // appBar title
+  late ScrollController scrollController;
+  late VoidCallback _scrollCallback;
+  bool _scrollListenerAttached = false;
+  bool _visibleTitle = false;
+  String? action;
+  // 回复类型
+  late int replyType;
+  bool _isFabVisible = true;
+  int oid = 0;
+  int? opusId;
+  bool isOpusId = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // floor 1原创 2转发
+    init();
+    if (action == 'comment') {
+      _visibleTitle = true;
+      titleStreamC.add(true);
+    }
+
+    fabAnimationCtr = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 300),
+    );
+    fabAnimationCtr.forward();
+    // 滚动事件监听
+    scrollListener();
+  }
+
+  // 页面初始化
+  void init() async {
+    final Map args = Get.arguments as Map;
+    final dynamic sourceItem = args['item'];
+    final int floor = args['floor'] is int ? args['floor'] as int : 1;
+    if (sourceItem == null || sourceItem.basic is! Map) {
+      return;
+    }
+    // 从action栏点击进入的评论页可能没有可用动态正文，仍允许评论接口继续工作。
+    action = args.containsKey('action') ? args['action'] : null;
+    final Map basic = Map.from(sourceItem.basic as Map);
+    final int commentType = basic['comment_type'] is num
+        ? (basic['comment_type'] as num).toInt()
+        : int.tryParse('${basic['comment_type'] ?? 11}') ?? 11;
+    replyType = commentType == 0 ? 11 : commentType;
+
+    if (floor == 1) {
+      final commentId = basic['comment_id_str']?.toString();
+      oid = int.tryParse(commentId ?? '') ?? 0;
+    } else {
+      try {
+        ModuleDynamicModel? moduleDynamic = sourceItem.modules?.moduleDynamic;
+        final majorType = moduleDynamic?.major?.type;
+
+        if (majorType == 'MAJOR_TYPE_OPUS') {
+          final jumpUrl = moduleDynamic?.major?.opus?.jumpUrl ?? '';
+          final idText = RegExp(r'/opus/(\d+)').firstMatch(jumpUrl)?.group(1);
+          opusId = int.tryParse(idText ?? '');
+          if (opusId != null) {
+            isOpusId = true;
+            _dynamicDetailController = Get.put(
+                DynamicDetailController(oid, replyType),
+                tag: opusId.toString());
+            await _dynamicDetailController.reqHtmlByOpusId(opusId!);
+            if (mounted) setState(() {});
+          }
+        } else {
+          oid = moduleDynamic?.major?.draw?.id ?? oid;
+        }
+      } catch (_) {}
+    }
+    if (!isOpusId) {
+      _dynamicDetailController =
+          Get.put(DynamicDetailController(oid, replyType), tag: oid.toString());
+    }
+    final itemForPage = _dynamicDetailController.item ?? sourceItem;
+    if (itemForPage == null) {
+      return;
+    }
+    _futureBuilderFuture = _dynamicDetailController.queryReplyList();
+  }
+
+  // 查看二级评论
+  void replyReply(replyItem, currentReply, loadMore) {
+    int oid = replyItem.oid;
+    int rpid = replyItem.rpid!;
+    Get.to(
+      () => Scaffold(
+        appBar: AppBar(
+          titleSpacing: 0,
+          centerTitle: false,
+          title: Text(
+            '评论详情',
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
+        ),
+        body: VideoReplyReplyPanel(
+          oid: oid,
+          rpid: rpid,
+          source: 'dynamic',
+          replyType: ReplyType.values[replyType],
+          firstFloor: replyItem,
+          loadMore: loadMore,
+        ),
+      ),
+    );
+  }
+
+  // 滑动事件监听
+  void scrollListener() {
+    scrollController = _dynamicDetailController.scrollController;
+    _scrollCallback = () {
+      if (!mounted) return;
+      // 分页加载
+      if (scrollController.position.pixels >=
+          scrollController.position.maxScrollExtent - 300) {
+        EasyThrottle.throttle('replylist', const Duration(seconds: 2), () {
+          _dynamicDetailController.queryReplyList(reqType: 'onLoad');
+        });
+      }
+
+      if (scrollController.offset > 55 && !_visibleTitle) {
+        _visibleTitle = true;
+        titleStreamC.add(true);
+      } else if (scrollController.offset <= 55 && _visibleTitle) {
+        _visibleTitle = false;
+        titleStreamC.add(false);
+      }
+
+      final ScrollDirection direction =
+          scrollController.position.userScrollDirection;
+      if (direction == ScrollDirection.forward) {
+        _showFab();
+      } else if (direction == ScrollDirection.reverse) {
+        _hideFab();
+      }
+    };
+    scrollController.addListener(_scrollCallback);
+    _scrollListenerAttached = true;
+  }
+
+  void _showFab() {
+    if (!_isFabVisible) {
+      _isFabVisible = true;
+      fabAnimationCtr.forward();
+    }
+  }
+
+  void _hideFab() {
+    if (_isFabVisible) {
+      _isFabVisible = false;
+      fabAnimationCtr.reverse();
+    }
+  }
+
+  @override
+  void dispose() {
+    if (_scrollListenerAttached) {
+      scrollController.removeListener(_scrollCallback);
+    }
+    fabAnimationCtr.dispose();
+    titleStreamC.close();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        elevation: 0,
+        scrolledUnderElevation: 1,
+        centerTitle: false,
+        titleSpacing: 0,
+        title: StreamBuilder(
+          stream: titleStreamC.stream,
+          initialData: false,
+          builder: (context, AsyncSnapshot snapshot) {
+            return AnimatedOpacity(
+              opacity: snapshot.data ? 1 : 0,
+              duration: const Duration(milliseconds: 300),
+              child: AuthorPanel(item: _dynamicDetailController.item),
+            );
+          },
+        ),
+        // actions: _detailModel != null ? appBarAction() : [],
+      ),
+      body: RefreshIndicator(
+        onRefresh: () async {
+          await _dynamicDetailController.queryReplyList();
+        },
+        child: CustomScrollView(
+          controller: scrollController,
+          slivers: [
+            if (action != 'comment')
+              SliverToBoxAdapter(
+                child: DynamicPanel(
+                  item: _dynamicDetailController.item,
+                  source: 'detail',
+                ),
+              ),
+            SliverPersistentHeader(
+              delegate: _MySliverPersistentHeaderDelegate(
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.surface,
+                    border: Border(
+                      top: BorderSide(
+                        width: 0.6,
+                        color: Theme.of(context).dividerColor.withOpacity(0.05),
+                      ),
+                    ),
+                  ),
+                  height: 45,
+                  padding: const EdgeInsets.only(left: 12, right: 6),
+                  child: Row(
+                    children: [
+                      Obx(
+                        () => AnimatedSwitcher(
+                          duration: const Duration(milliseconds: 400),
+                          transitionBuilder:
+                              (Widget child, Animation<double> animation) {
+                            return ScaleTransition(
+                                scale: animation, child: child);
+                          },
+                          child: Text(
+                            '${_dynamicDetailController.acount.value}',
+                            key: ValueKey<int>(
+                                _dynamicDetailController.acount.value),
+                          ),
+                        ),
+                      ),
+                      const Text('条回复'),
+                      const Spacer(),
+                      SizedBox(
+                        height: 35,
+                        child: TextButton.icon(
+                          onPressed: () =>
+                              _dynamicDetailController.queryBySort(),
+                          icon: const Icon(Icons.sort, size: 16),
+                          label: Obx(() => Text(
+                                _dynamicDetailController.sortTypeLabel.value,
+                                style: const TextStyle(fontSize: 13),
+                              )),
+                        ),
+                      )
+                    ],
+                  ),
+                ),
+              ),
+              pinned: true,
+            ),
+            FutureBuilder(
+              future: _futureBuilderFuture,
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.done) {
+                  Map data = snapshot.data as Map;
+                  if (snapshot.data['status']) {
+                    RxList<ReplyItemModel> replyList =
+                        _dynamicDetailController.replyList;
+                    // 请求成功
+                    return Obx(
+                      () => replyList.isEmpty &&
+                              _dynamicDetailController.isLoadingMore
+                          ? SliverList(
+                              delegate:
+                                  SliverChildBuilderDelegate((context, index) {
+                                return const VideoReplySkeleton();
+                              }, childCount: 8),
+                            )
+                          : SliverList(
+                              delegate: SliverChildBuilderDelegate(
+                                (context, index) {
+                                  if (index == replyList.length) {
+                                    return Container(
+                                      padding: EdgeInsets.only(
+                                          bottom: MediaQuery.of(context)
+                                              .padding
+                                              .bottom),
+                                      height: MediaQuery.of(context)
+                                              .padding
+                                              .bottom +
+                                          100,
+                                      child: Center(
+                                        child: Obx(
+                                          () => Text(
+                                            _dynamicDetailController
+                                                .noMore.value,
+                                            style: TextStyle(
+                                              fontSize: 12,
+                                              color: Theme.of(context)
+                                                  .colorScheme
+                                                  .outline,
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    );
+                                  } else {
+                                    return ReplyItem(
+                                      replyItem: replyList[index],
+                                      showReplyRow: true,
+                                      replyLevel: '1',
+                                      replyReply:
+                                          (replyItem, currentReply, loadMore) =>
+                                              replyReply(replyItem,
+                                                  currentReply, loadMore),
+                                      replyType: ReplyType.values[replyType],
+                                      addReply: (replyItem) {
+                                        replyList[index]
+                                            .replies!
+                                            .add(replyItem);
+                                      },
+                                    );
+                                  }
+                                },
+                                childCount: replyList.length + 1,
+                              ),
+                            ),
+                    );
+                  } else {
+                    // 请求错误
+                    return HttpError(
+                      errMsg: data['msg'],
+                      fn: () => setState(() {}),
+                    );
+                  }
+                } else {
+                  // 骨架屏
+                  return SliverList(
+                    delegate: SliverChildBuilderDelegate((context, index) {
+                      return const VideoReplySkeleton();
+                    }, childCount: 8),
+                  );
+                }
+              },
+            )
+          ],
+        ),
+      ),
+      floatingActionButton: SlideTransition(
+        position: Tween<Offset>(
+          begin: const Offset(0, 2),
+          end: const Offset(0, 0),
+        ).animate(
+          CurvedAnimation(
+            parent: fabAnimationCtr,
+            curve: Curves.easeInOut,
+          ),
+        ),
+        child: Obx(
+          () => _dynamicDetailController.replyReqCode.value == 12061
+              ? const SizedBox()
+              : FloatingActionButton(
+                  heroTag: null,
+                  onPressed: () {
+                    feedBack();
+                    showModalBottomSheet(
+                      context: context,
+                      isScrollControlled: true,
+                      builder: (BuildContext context) {
+                        return VideoReplyNewDialog(
+                          oid: _dynamicDetailController.oid ??
+                              IdUtils.bv2av(Get.parameters['bvid']!),
+                          root: 0,
+                          parent: 0,
+                          replyType: ReplyType.values[replyType],
+                        );
+                      },
+                    ).then(
+                      (value) => {
+                        // 完成评论，数据添加
+                        if (value != null && value['data'] != null)
+                          {
+                            _dynamicDetailController.replyList
+                                .add(value['data']),
+                            _dynamicDetailController.acount.value++
+                          }
+                      },
+                    );
+                  },
+                  tooltip: '评论动态',
+                  child: const Icon(Icons.reply),
+                ),
+        ),
+      ),
+    );
+  }
+}
+
+class _MySliverPersistentHeaderDelegate extends SliverPersistentHeaderDelegate {
+  final double _minExtent = 45;
+  final double _maxExtent = 45;
+  final Widget child;
+
+  _MySliverPersistentHeaderDelegate({required this.child});
+
+  @override
+  Widget build(
+      BuildContext context, double shrinkOffset, bool overlapsContent) {
+    //创建child子组件
+    //shrinkOffset：child偏移值minExtent~maxExtent
+    //overlapsContent：SliverPersistentHeader覆盖其他子组件返回true，否则返回false
+    return child;
+  }
+
+  //SliverPersistentHeader最大高度
+  @override
+  double get maxExtent => _maxExtent;
+
+  //SliverPersistentHeader最小高度
+  @override
+  double get minExtent => _minExtent;
+
+  @override
+  bool shouldRebuild(covariant _MySliverPersistentHeaderDelegate oldDelegate) {
+    return true;
+  }
+}
