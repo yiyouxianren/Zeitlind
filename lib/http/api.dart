@@ -606,13 +606,13 @@ class Api {
   static const String liveRoomEntry =
       '${HttpString.liveBaseUrl}/xlive/web-room/v1/index/roomEntryAction';
 
-  /// 我的粉丝牌列表（v5，含佩戴状态与主播 uid）
+  /// 我的粉丝牌列表（v1，含佩戴状态与主播 uid）
   static const String fansMedalList =
-      '${HttpString.liveBaseUrl}/xlive/app-ucenter/v5/user/medal';
+      '${HttpString.liveBaseUrl}/xlive/app-ucenter/v1/user/GetMyMedals';
 
-  /// 佩戴 / 取消佩戴粉丝牌（status=1 佩戴，0 取下）
+  /// 佩戴粉丝牌（medal_id=0 表示取下）
   static const String wearFansMedal =
-      '${HttpString.liveBaseUrl}/xlive/app-ucenter/v5/medal/wear';
+      '${HttpString.liveBaseUrl}/xlive/web-room/v1/fansMedal/wear';
 
   /// 删除评论
   static const String replyDel = '/x/v2/reply/del';

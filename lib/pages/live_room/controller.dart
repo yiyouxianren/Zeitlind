@@ -546,7 +546,6 @@ class LiveRoomController extends GetxController {
       if (target != null) {
         final ok = await LiveHttp.wearFansMedal(
           medalId: target['medal_id'] as int,
-          status: 1,
         );
         if (ok) {
           _autoWornMedalId = target['medal_id'] as int;
@@ -625,7 +624,7 @@ class LiveRoomController extends GetxController {
   Future<void> wearMedalFromPanel(Map<String, dynamic> medal) async {
     final medalId = medal['medal_id'] as int;
     final name = medal['medal_name']?.toString() ?? '';
-    final ok = await LiveHttp.wearFansMedal(medalId: medalId, status: 1);
+    final ok = await LiveHttp.wearFansMedal(medalId: medalId);
     if (ok) {
       // 同步面板内的佩戴标记
       for (final m in medalList) {
@@ -645,7 +644,7 @@ class LiveRoomController extends GetxController {
 
   /// 面板中取下当前佩戴的粉丝牌
   Future<void> takeOffMedalFromPanel() async {
-    final ok = await LiveHttp.wearFansMedal(medalId: 0, status: 0);
+    final ok = await LiveHttp.wearFansMedal(medalId: 0);
     if (ok) {
       for (final m in medalList) {
         m['wear'] = false;
@@ -677,13 +676,13 @@ class LiveRoomController extends GetxController {
     try {
       if (prev != null && prev != worn) {
         // 恢复之前佩戴的另一块粉丝牌
-        final ok = await LiveHttp.wearFansMedal(medalId: prev, status: 1);
+        final ok = await LiveHttp.wearFansMedal(medalId: prev);
         if (ok) {
           _medalToast('已还原粉丝牌${prevName != null ? '「$prevName」' : ''}');
         }
       } else {
         // 之前没佩戴（或戴的就是这块）：取下
-        final ok = await LiveHttp.wearFansMedal(medalId: 0, status: 0);
+        final ok = await LiveHttp.wearFansMedal(medalId: 0);
         if (ok) {
           _medalToast('已取下粉丝牌，恢复未佩戴状态');
         }
