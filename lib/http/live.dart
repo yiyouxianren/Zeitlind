@@ -329,7 +329,9 @@ class LiveHttp {
 
   /// 我的粉丝牌列表：返回 [{medal_id, target_id(主播uid), medal_name, level, status(1=佩戴中), ...}]
   /// 接口异常时抛出带信息的异常，便于上层区分“没有粉丝牌”和“接口异常”。
+  /// 注意：page_size 上限为 10（超过返回 1002002 参数异常），按 10/页翻页。
   static Future<List<Map<String, dynamic>>> fansMedalList() async {
+    const int pageSize = 10;
     final List<Map<String, dynamic>> medals = [];
     int page = 1;
     while (true) {
@@ -337,7 +339,7 @@ class LiveHttp {
         Api.fansMedalList,
         data: {
           'page': page,
-          'page_size': 100,
+          'page_size': pageSize,
         },
         extra: {
           'ua': 'pc',
@@ -373,7 +375,7 @@ class LiveHttp {
           : const {};
       final totalPages = _asInt(pageInfo['total_page']);
       if (totalPages != null && page >= totalPages) break;
-      if (list.length < 100) break;
+      if (list.length < pageSize) break;
       page++;
     }
     return medals;
