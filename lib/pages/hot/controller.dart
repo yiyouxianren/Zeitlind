@@ -9,22 +9,36 @@ class HotController extends GetxController {
   int _currentPage = 1;
   RxList<HotVideoItemModel> videoList = <HotVideoItemModel>[].obs;
   bool isLoadingMore = false;
-  bool flag = false;
+  // 与 B 站网页端一致：热门为固定榜单，翻页到头后不再请求
+  bool hasMore = true;
   OverlayEntry? popupDialog;
 
   // 获取推荐
   Future queryHotFeed(type) async {
+    // 下拉刷新回到第 1 页：重新取榜首内容整表替换，
+    // 避免旧数据无限前插导致列表越来越长、内容越刷越杂
+    if (type == 'onRefresh') {
+      _currentPage = 1;
+      hasMore = true;
+    }
+    if (!hasMore && type == 'onLoad') {
+      return {'status': false, 'msg': '没有更多'};
+    }
     var res = await VideoHttp.hotVideoList(
       pn: _currentPage,
       ps: _count,
     );
     if (res['status']) {
-      if (type == 'init') {
-        videoList.value = res['data'];
-      } else if (type == 'onRefresh') {
-        videoList.insertAll(0, res['data']);
+      final List<HotVideoItemModel> list = res['data'];
+      if (type == 'init' || type == 'onRefresh') {
+        videoList.value = list;
       } else if (type == 'onLoad') {
-        videoList.addAll(res['data']);
+        // 服务端翻页返回空列表视为榜单到底
+        if (list.isEmpty) {
+          hasMore = false;
+        } else {
+          videoList.addAll(list);
+        }
       }
       _currentPage += 1;
     }
