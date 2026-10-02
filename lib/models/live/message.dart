@@ -19,6 +19,12 @@ class LiveMessageModel {
   final bool isSelf;
   final LiveMessageColor color;
 
+  /// 粉丝牌名称（无粉丝牌时为 null）
+  final String? medalName;
+
+  /// 粉丝牌等级（无粉丝牌时为 null）
+  final int? medalLevel;
+
   LiveMessageModel({
     required this.type,
     required this.userName,
@@ -31,6 +37,8 @@ class LiveMessageModel {
     this.emote,
     this.dmid,
     this.isSelf = false,
+    this.medalName,
+    this.medalLevel,
   });
 }
 

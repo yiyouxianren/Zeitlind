@@ -35,6 +35,18 @@ class LiveUtils {
           final colorValue = _asInt(extra['color']) ??
               (first.length > 3 ? _asInt(first[3]) : null) ??
               0;
+          // 粉丝牌：info[3] = [level, name, 创建主播名, ...]
+          // （name 为空串表示该用户没有粉丝牌）
+          final medal = info.length > 3 && info[3] is List ? info[3] as List : null;
+          final medalLevel = medal != null && medal.isNotEmpty
+              ? _asInt(medal[0])
+              : null;
+          final String? medalName = medal != null &&
+                  medal.length > 1 &&
+                  medal[1] is String &&
+                  (medal[1] as String).isNotEmpty
+              ? medal[1] as String
+              : null;
           return LiveMessageModel(
             type: LiveMessageType.chat,
             userName: name,
@@ -48,6 +60,8 @@ class LiveUtils {
             emote: userEmote,
             dmid: _asInt(extra['id_str']) ??
                 (first.length > 10 ? _asInt(first[10]) : null),
+            medalName: medalName != null && medalLevel != null ? medalName : null,
+            medalLevel: medalName != null && medalLevel != null ? medalLevel : null,
           );
         case 'SUPER_CHAT_MESSAGE':
           final data = obj['data'];

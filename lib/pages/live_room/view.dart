@@ -740,6 +740,16 @@ Widget buildMessageListUI(
                         TextSpan(
                           style: const TextStyle(color: Colors.white),
                           children: [
+                            if (liveMsgItem.medalName != null &&
+                                liveMsgItem.medalLevel != null) ...[
+                              TextSpan(
+                                text:
+                                    '【${liveMsgItem.medalName} lv${liveMsgItem.medalLevel}】',
+                                style: TextStyle(
+                                  color: Colors.white.withOpacity(0.75),
+                                ),
+                              ),
+                            ],
                             TextSpan(
                               text: '${liveMsgItem.userName}: ',
                               style: TextStyle(
