@@ -7,6 +7,7 @@ import 'package:pilipala/models/common/search_type.dart';
 import 'package:pilipala/models/search/result.dart';
 import 'package:pilipala/utils/blacklist_filter.dart';
 import 'package:pilipala/utils/id_utils.dart';
+import 'package:pilipala/utils/keyword_filter.dart';
 import 'package:pilipala/utils/utils.dart';
 
 class SearchPanelController extends GetxController {
@@ -42,8 +43,12 @@ class SearchPanelController extends GetxController {
   }
 
   void _onBlacklistChanged() {
-    _reapplyPinned();
-    final filtered = _filterVideos(resultList);
+    // 黑名单变化时重新过滤置顶卡片与列表（含黑名单用户昵称关键词联动）
+    final filteredUsers = _filterUsers(pinnedUsers);
+    if (filteredUsers.length != pinnedUsers.length) {
+      pinnedUsers.value = filteredUsers;
+    }
+    final filtered = _filterVideos(_filterUsers(resultList));
     if (filtered.length != resultList.length) {
       resultList.value = filtered;
     }
@@ -57,6 +62,25 @@ class SearchPanelController extends GetxController {
             !BlacklistFilter.isBlocked(item is SearchVideoItemModel
                 ? (item.mid ?? item.owner?.mid)
                 : null))
+        .toList();
+  }
+
+  /// 用户条目（置顶卡片/用户 tab）的统一过滤：
+  /// 1. 黑名单 mid 命中；
+  /// 2. 昵称命中关键词屏蔽（原样词/正则/拉黑用户昵称）——与视频结果同规则，
+  ///    覆盖"主动搜索拉黑用户名"场景：搜索词即用户名时关键词过滤会放行，
+  ///    这里必须独立拦下黑名单用户的推荐卡片。
+  static bool _isUserBlocked(SearchUserItemModel user) {
+    if (BlacklistFilter.isBlocked(user.mid)) return true;
+    return KeywordFilter.shouldBlock(
+      title: user.uname,
+      description: user.usign,
+    );
+  }
+
+  List _filterUsers(List list) {
+    return list
+        .where((item) => item is! SearchUserItemModel || !_isUserBlocked(item))
         .toList();
   }
 
@@ -100,13 +124,12 @@ class SearchPanelController extends GetxController {
       if (res['status'] == true) {
         final users = res['data'].users ?? [];
         if (users.isNotEmpty) {
-          // 黑名单开启时：屏蔽黑名单 UP 的推荐卡片（与视频结果的过滤规则一致）
-          final visible = BlacklistFilter.filter(
-            users,
-            (dynamic item) => item.mid,
-          );
+          // 黑名单 mid + 关键词（含黑名单用户昵称）双重过滤，
+          // 与视频结果的过滤规则一致
+          final visible =
+              users.where((u) => !_isUserBlocked(u)).toList().take(3).toList();
           if (visible.isNotEmpty) {
-            pinnedUsers.value = visible.take(3).toList();
+            pinnedUsers.value = visible;
             // 若视频列表已就绪，把 UP 主卡片插到最前
             if (resultList.isNotEmpty) {
               _reapplyPinned();
@@ -121,27 +144,29 @@ class SearchPanelController extends GetxController {
 
   /// 把置顶 UP 主卡片合并进结果列表头部（幂等，可重复调用）。
   void _reapplyPinned() {
-    final videos = _filterVideos(
+    final videos = _filterVideos(_filterUsers(
       resultList.where((i) => i is! SearchUserItemModel).toList(),
-    );
-    if (pinnedUsers.isEmpty) {
+    ));
+    final pins = _filterUsers(pinnedUsers);
+    if (pins.isEmpty) {
       if (resultList.length != videos.length) {
         resultList.value = videos;
       }
       return;
     }
-    final merged = [...pinnedUsers, ...videos];
+    final merged = [...pins, ...videos];
     resultList.value = merged;
   }
 
   /// 仅在刷新拿到新数据时调用：以新列表为基座重插置顶卡片
   void _applyPinned(List baseList) {
-    final videos = _filterVideos(baseList);
-    if (pinnedUsers.isEmpty) {
+    final videos = _filterVideos(_filterUsers(baseList));
+    final pins = _filterUsers(pinnedUsers);
+    if (pins.isEmpty) {
       resultList.value = videos;
       return;
     }
-    resultList.value = [...pinnedUsers, ...videos];
+    resultList.value = [...pins, ...videos];
   }
 
   Future onRefresh() async {

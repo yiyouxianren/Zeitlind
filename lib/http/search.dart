@@ -117,7 +117,20 @@ class SearchHttp {
             data = SearchLiveModel.fromJson(res.data['data']);
             break;
           case SearchType.bili_user:
-            data = SearchUserModel.fromJson(res.data['data']);
+            // 用户搜索结果：过滤黑名单用户及昵称命中关键词屏蔽的条目
+            final result = (res.data['data']['result'] as Iterable?)
+                    ?.where((item) =>
+                        item is Map &&
+                        !BlacklistFilter.isBlocked(item['mid']) &&
+                        !KeywordFilter.shouldBlock(
+                          title: item['uname'],
+                          description: item['usign'],
+                        ))
+                    .toList() ??
+                [];
+            final userMap = Map<String, dynamic>.from(res.data['data']);
+            userMap['result'] = result;
+            data = SearchUserModel.fromJson(userMap);
             break;
           case SearchType.media_bangumi:
             data = SearchMBangumiModel.fromJson(res.data['data']);

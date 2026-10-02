@@ -15,6 +15,7 @@ import 'package:pilipala/pages/media/index.dart';
 import 'package:pilipala/pages/mine/index.dart';
 import 'package:pilipala/pages/main/index.dart';
 import 'package:pilipala/models/user/info.dart';
+import 'package:pilipala/utils/blacklist_filter.dart';
 import 'package:pilipala/utils/cookie.dart';
 import 'package:pilipala/utils/storage.dart';
 import 'package:uuid/uuid.dart';
@@ -51,6 +52,20 @@ class LoginUtils {
       }
       if (Get.isRegistered<MainController>()) {
         Get.find<MainController>().userLogin.value = isLoggedIn;
+      }
+
+      // 登录态变化时同步服务端黑名单：刚登录/切换账号后，
+      // 让搜索置顶 UP 卡等过滤立即拿到最新的黑名单数据
+      if (isLoggedIn) {
+        try {
+          await BlacklistSync.refresh();
+        } catch (_) {}
+      } else {
+        // 退出登录清空本地黑名单缓存，避免残留上个账号的拉黑数据
+        await GStrorage.setting
+            .put(SettingBoxKey.blackMidsList, <dynamic>[-1]);
+        await GStrorage.setting.put(SettingBoxKey.blacklistNames, {});
+        BlacklistUpdateBus.notify();
       }
     } catch (err) {
       SmartDialog.showToast('refreshLoginStatus error: ${err.toString()}');

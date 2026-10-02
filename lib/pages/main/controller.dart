@@ -6,6 +6,7 @@ import 'package:get/get.dart';
 import 'package:flutter/material.dart';
 import 'package:hive/hive.dart';
 import 'package:pilipala/http/common.dart';
+import 'package:pilipala/utils/blacklist_filter.dart';
 import 'package:pilipala/utils/simple_mode_service.dart';
 import 'package:pilipala/utils/unfollow_service.dart';
 import 'package:pilipala/utils/unfav_service.dart';
@@ -63,6 +64,10 @@ class MainController extends GetxController {
     userLogin.value = userInfo is UserInfoData &&
         userInfo.isLogin == true &&
         userInfo.mid != null;
+    // 启动时（已登录）从服务端同步黑名单，覆盖其他端/网页端的拉黑变更
+    if (userLogin.value) {
+      unawaited(BlacklistSync.refresh());
+    }
     dynamicBadgeType.value = DynamicBadgeMode.values[setting.get(
         SettingBoxKey.dynamicBadgeMode,
         defaultValue: DynamicBadgeMode.number.code)];
