@@ -326,4 +326,78 @@ class LiveHttp {
       },
     );
   }
+
+  /// 我的粉丝牌列表：返回 [{medal_id, anchor_uid(=target_id), medal_name, level, status(1=佩戴中), ...}]
+  static Future<List<Map<String, dynamic>>> fansMedalList() async {
+    final List<Map<String, dynamic>> medals = [];
+    int page = 1;
+    while (true) {
+      final csrf = await Request.getCsrf();
+      final res = await Request().get(
+        Api.fansMedalList,
+        data: {
+          'page': page,
+          'page_size': 100,
+          'source': 1,
+          'csrf': csrf,
+          'csrf_token': csrf,
+        },
+      );
+      final body = res.data;
+      if (body is! Map || body['code'] != 0) break;
+      final data = body['data'];
+      final List? list = data is Map ? data['list'] : null;
+      if (list == null || list.isEmpty) break;
+      for (final item in list) {
+        if (item is Map) {
+          final medal = item['medal'] is Map ? item['medal'] as Map : const {};
+          final anchor = item['anchor'] is Map ? item['anchor'] as Map : const {};
+          medals.add({
+            'medal_id': _asInt(item['medal_id']) ?? 0,
+            'target_id': _asInt(item['target_id']) ??
+                _asInt(medal['target_id']) ??
+                _asInt(anchor['uid']),
+            'medal_name': (medal['name'] ?? item['name'] ?? '')
+                .toString(),
+            'level': _asInt(medal['level'] ?? item['level']),
+            'status': _asInt(item['status']),
+            'wear': _asBool(medal['status'] ?? item['status']),
+          });
+        }
+      }
+      final total = data is Map ? _asInt(data['total_count']) : null;
+      if (total != null && medals.length >= total) break;
+      if (list.length < 100) break;
+      page++;
+    }
+    return medals;
+  }
+
+  /// 佩戴 / 取下粉丝牌。medalId 传 0 且 status=0 表示取下当前佩戴。
+  static Future<bool> wearFansMedal({required int medalId, required int status}) async {
+    final csrf = await Request.getCsrf();
+    final res = await Request().post(
+      Api.wearFansMedal,
+      data: {
+        'medal_id': medalId,
+        'status': status,
+        'csrf': csrf,
+        'csrf_token': csrf,
+        'visit_id': '',
+      },
+    );
+    return res.data is Map && res.data['code'] == 0;
+  }
+
+  static int? _asInt(dynamic value) {
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    return int.tryParse(value?.toString() ?? '');
+  }
+
+  static bool _asBool(dynamic value) {
+    if (value is bool) return value;
+    final v = _asInt(value);
+    return v != null && v != 0;
+  }
 }

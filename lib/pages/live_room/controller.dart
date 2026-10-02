@@ -506,8 +506,68 @@ class LiveRoomController extends GetxController {
     var res = await LiveHttp.liveRoomInfoH5(roomId: roomId);
     if (res['status']) {
       roomInfoH5.value = res['data'];
+      unawaited(_autoWearFansMedal());
     }
     return res;
+  }
+
+  // ============ 进直播间自动佩戴主播粉丝牌 ============
+  // 查询我的粉丝牌库，命中本直播间主播的粉丝牌则换上；
+  // 没有则不佩戴。离开直播间时恢复进房前的佩戴状态。
+  int? _autoWornMedalId;
+  int? _prevWornMedalId;
+
+  Future<void> _autoWearFansMedal() async {
+    if (userId == 0) return; // 未登录
+    try {
+      final anchorUid = roomInfoH5.value.roomInfo?.uid;
+      if (anchorUid == null) return;
+      final medals = await LiveHttp.fansMedalList();
+      if (medals.isEmpty) return;
+      Map<String, dynamic>? target;
+      Map<String, dynamic>? currentWorn;
+      for (final m in medals) {
+        final wearing = m['wear'] == true || m['status'] == 1;
+        if (wearing) currentWorn = m;
+        if (m['target_id'] == anchorUid) target = m;
+      }
+      _prevWornMedalId = currentWorn?['medal_id'] as int?;
+      // 已戴着本直播间粉丝牌则无需操作
+      if (target != null && identical(target, currentWorn)) return;
+      if (target != null) {
+        final ok = await LiveHttp.wearFansMedal(
+          medalId: target['medal_id'] as int,
+          status: 1,
+        );
+        if (ok) {
+          _autoWornMedalId = target['medal_id'] as int;
+          debugPrint('已自动佩戴粉丝牌：${target['medal_name']}');
+        }
+      } else {
+        // 粉丝牌库里没有本直播间主播的牌：不展示粉丝牌
+        debugPrint('粉丝牌库中无本直播间主播的粉丝牌，不佩戴');
+      }
+    } catch (e) {
+      debugPrint('auto wear fans medal error: $e');
+    }
+  }
+
+  /// 离开直播间：取下自动换上的粉丝牌，并恢复此前的佩戴
+  Future<void> _restoreFansMedal() async {
+    final worn = _autoWornMedalId;
+    final prev = _prevWornMedalId;
+    _autoWornMedalId = null;
+    _prevWornMedalId = null;
+    if (userId == 0 || worn == null) return;
+    try {
+      if (prev != null && prev != worn) {
+        // 恢复之前佩戴的另一块粉丝牌
+        await LiveHttp.wearFansMedal(medalId: prev, status: 1);
+      } else {
+        // 之前没佩戴（或戴的就是这块）：取下
+        await LiveHttp.wearFansMedal(medalId: 0, status: 0);
+      }
+    } catch (_) {}
   }
 
   // 修改画质
@@ -615,6 +675,7 @@ class LiveRoomController extends GetxController {
   @override
   void onClose() {
     heartBeat();
+    unawaited(_restoreFansMedal());
     closeLiveMsg();
     _playerErrorSub?.cancel();
     _stallWatchdog?.cancel();
