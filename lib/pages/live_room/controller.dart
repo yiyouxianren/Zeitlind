@@ -571,6 +571,94 @@ class LiveRoomController extends GetxController {
     SmartDialog.showToast(msg);
   }
 
+  // ============ 手动更换粉丝牌面板 ============
+  RxBool showMedalPanel = false.obs;
+  RxBool medalLoading = false.obs;
+  RxString medalError = ''.obs;
+  RxList<Map<String, dynamic>> medalList = <Map<String, dynamic>>[].obs;
+  bool _medalListLoaded = false;
+
+  /// 打开/关闭粉丝牌面板（点输入栏左侧按钮）
+  void toggleMedalPanel() {
+    final show = !showMedalPanel.value;
+    showMedalPanel.value = show;
+    if (show) {
+      showEmotePanel.value = false;
+      loadMedalList();
+    }
+  }
+
+  /// 拉取粉丝牌库（含佩戴状态）
+  Future<void> loadMedalList() async {
+    if (_medalListLoaded || medalLoading.value) return;
+    if (userId == 0) {
+      medalError.value = '登录后可管理粉丝牌';
+      return;
+    }
+    medalLoading.value = true;
+    medalError.value = '';
+    try {
+      final medals = await LiveHttp.fansMedalList();
+      if (medals.isEmpty) {
+        medalError.value = '暂无粉丝牌';
+      } else {
+        medalList.assignAll(medals);
+        _medalListLoaded = true;
+      }
+    } catch (e) {
+      medalError.value = '粉丝牌获取失败: $e';
+    } finally {
+      medalLoading.value = false;
+    }
+  }
+
+  /// 刷新粉丝牌库（下拉/重试）
+  Future<void> refreshMedalList() async {
+    _medalListLoaded = false;
+    medalList.clear();
+    await loadMedalList();
+  }
+
+  /// 面板中手动佩戴某块粉丝牌
+  Future<void> wearMedalFromPanel(Map<String, dynamic> medal) async {
+    final medalId = medal['medal_id'] as int;
+    final name = medal['medal_name']?.toString() ?? '';
+    final ok = await LiveHttp.wearFansMedal(medalId: medalId, status: 1);
+    if (ok) {
+      // 同步面板内的佩戴标记
+      for (final m in medalList) {
+        m['wear'] = m['medal_id'] == medalId;
+        m['status'] = m['medal_id'] == medalId ? 1 : 0;
+      }
+      medalList.refresh();
+      // 手动换牌后视为用户当前的意愿，退出还原以这块牌为基准
+      _prevWornMedalId = medalId;
+      _prevWornMedalName = name;
+      _autoWornMedalId = null;
+      _medalToast('已佩戴粉丝牌「$name」');
+    } else {
+      _medalToast('佩戴粉丝牌「$name」失败');
+    }
+  }
+
+  /// 面板中取下当前佩戴的粉丝牌
+  Future<void> takeOffMedalFromPanel() async {
+    final ok = await LiveHttp.wearFansMedal(medalId: 0, status: 0);
+    if (ok) {
+      for (final m in medalList) {
+        m['wear'] = false;
+        m['status'] = 0;
+      }
+      medalList.refresh();
+      _prevWornMedalId = null;
+      _prevWornMedalName = null;
+      _autoWornMedalId = null;
+      _medalToast('已取下粉丝牌');
+    } else {
+      _medalToast('取下粉丝牌失败');
+    }
+  }
+
   /// 离开直播间：取下自动换上的粉丝牌，并恢复此前的佩戴
   Future<void> _restoreFansMedal() async {
     final worn = _autoWornMedalId;

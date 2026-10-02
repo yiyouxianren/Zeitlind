@@ -234,6 +234,119 @@ class _LiveRoomPageState extends State<LiveRoomPage>
     });
   }
 
+  /// 粉丝牌面板：展示粉丝牌库，点选佩戴，支持取下与刷新
+  Widget _buildMedalPanel() {
+    final ctr = _liveRoomController;
+    return Obx(() {
+      if (ctr.medalLoading.value) {
+        return const SizedBox(
+          height: 220,
+          child: Center(child: CircularProgressIndicator()),
+        );
+      }
+      if (ctr.medalError.value.isNotEmpty) {
+        return SizedBox(
+          height: 220,
+          child: Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(ctr.medalError.value),
+                const SizedBox(height: 8),
+                TextButton(
+                  onPressed: () => ctr.refreshMedalList(),
+                  child: const Text('重试'),
+                ),
+              ],
+            ),
+          ),
+        );
+      }
+      final medals = ctr.medalList;
+      if (medals.isEmpty) {
+        return const SizedBox(
+          height: 220,
+          child: Center(child: Text('暂无粉丝牌')),
+        );
+      }
+      return SizedBox(
+        height: 250,
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 8, 8, 0),
+              child: Row(
+                children: [
+                  Text(
+                    '粉丝牌（${medals.length}）',
+                    style: Theme.of(context).textTheme.titleSmall,
+                  ),
+                  const Spacer(),
+                  IconButton(
+                    tooltip: '刷新',
+                    onPressed: () => ctr.refreshMedalList(),
+                    icon: Icon(
+                      Icons.refresh_outlined,
+                      size: 18,
+                      color: Theme.of(context).colorScheme.outline,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Expanded(
+              child: ListView.builder(
+                padding: const EdgeInsets.only(bottom: 8),
+                itemCount: medals.length,
+                itemBuilder: (context, index) {
+                  final medal = medals[index];
+                  final wearing =
+                      medal['wear'] == true || medal['status'] == 1;
+                  final name = medal['medal_name']?.toString() ?? '';
+                  final level = medal['level'];
+                  return ListTile(
+                    dense: true,
+                    onTap: () {
+                      if (!wearing) ctr.wearMedalFromPanel(medal);
+                    },
+                    leading: Icon(
+                      Icons.military_tech_outlined,
+                      size: 22,
+                      color: wearing
+                          ? Theme.of(context).colorScheme.primary
+                          : Theme.of(context).colorScheme.outline,
+                    ),
+                    title: Text(
+                      name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: wearing
+                            ? Theme.of(context).colorScheme.primary
+                            : null,
+                      ),
+                    ),
+                    subtitle: level != null ? Text('Lv.$level') : null,
+                    trailing: wearing
+                        ? TextButton(
+                            onPressed: () => ctr.takeOffMedalFromPanel(),
+                            child: const Text('取下'),
+                          )
+                        : const Icon(
+                            Icons.chevron_right,
+                            size: 18,
+                          ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      );
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     Widget videoPlayerPanel = FutureBuilder(
@@ -544,12 +657,15 @@ class _LiveRoomPageState extends State<LiveRoomPage>
               left: 0,
               right: 0,
               bottom: 78 + MediaQuery.of(context).padding.bottom,
-              child: (_liveRoomController.showEmotePanel.value &&
+              child: ((_liveRoomController.showEmotePanel.value ||
+                          _liveRoomController.showMedalPanel.value) &&
                       MediaQuery.of(context).orientation ==
                           Orientation.portrait)
                   ? Material(
                       color: Theme.of(context).colorScheme.surface,
-                      child: _buildLiveEmotePanel(),
+                      child: _liveRoomController.showMedalPanel.value
+                          ? _buildMedalPanel()
+                          : _buildLiveEmotePanel(),
                     )
                   : const SizedBox.shrink(),
             ),
@@ -607,13 +723,33 @@ class _LiveRoomPageState extends State<LiveRoomPage>
                     const SizedBox(width: 8),
                     Obx(
                       () => IconButton(
+                        tooltip: '粉丝牌',
+                        onPressed: () {
+                          FocusScope.of(context).unfocus();
+                          _liveRoomController.toggleMedalPanel();
+                        },
+                        icon: Icon(
+                          Icons.military_tech_outlined,
+                          size: 20,
+                          color: _liveRoomController.showMedalPanel.value
+                              ? Theme.of(context).colorScheme.primary
+                              : Colors.white,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    Obx(
+                      () => IconButton(
                         tooltip: '表情',
                         onPressed: () {
                           FocusScope.of(context).unfocus();
                           final show =
                               !_liveRoomController.showEmotePanel.value;
                           _liveRoomController.showEmotePanel.value = show;
-                          if (show) _liveRoomController.loadLiveEmotes();
+                          if (show) {
+                            _liveRoomController.showMedalPanel.value = false;
+                            _liveRoomController.loadLiveEmotes();
+                          }
                         },
                         icon: Icon(
                           Icons.emoji_emotions_outlined,
@@ -629,6 +765,7 @@ class _LiveRoomPageState extends State<LiveRoomPage>
                       child: TextField(
                         onTap: () {
                           _liveRoomController.showEmotePanel.value = false;
+                          _liveRoomController.showMedalPanel.value = false;
                         },
                         controller: _liveRoomController.inputController,
                         style:
