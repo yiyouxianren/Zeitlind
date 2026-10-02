@@ -516,6 +516,7 @@ class LiveRoomController extends GetxController {
   // 没有则不佩戴。离开直播间时恢复进房前的佩戴状态。
   int? _autoWornMedalId;
   int? _prevWornMedalId;
+  String? _prevWornMedalName;
 
   Future<void> _autoWearFansMedal() async {
     if (userId == 0) return; // 未登录
@@ -536,8 +537,12 @@ class LiveRoomController extends GetxController {
         if (m['target_id'] == anchorUid) target = m;
       }
       _prevWornMedalId = currentWorn?['medal_id'] as int?;
+      _prevWornMedalName = currentWorn?['medal_name'] as String?;
       // 已戴着本直播间粉丝牌则无需操作
-      if (target != null && identical(target, currentWorn)) return;
+      if (target != null && identical(target, currentWorn)) {
+        _medalToast('已佩戴粉丝牌「${target['medal_name']}」，无需换牌');
+        return;
+      }
       if (target != null) {
         final ok = await LiveHttp.wearFansMedal(
           medalId: target['medal_id'] as int,
@@ -546,22 +551,34 @@ class LiveRoomController extends GetxController {
         if (ok) {
           _autoWornMedalId = target['medal_id'] as int;
           debugPrint('已自动佩戴粉丝牌：${target['medal_name']}');
+          _medalToast('已自动佩戴粉丝牌「${target['medal_name']}」');
+        } else {
+          _medalToast('佩戴粉丝牌「${target['medal_name']}」失败');
         }
       } else {
         // 粉丝牌库里没有本直播间主播的牌：不展示粉丝牌
         debugPrint('粉丝牌库中无本直播间主播的粉丝牌，不佩戴');
+        _medalToast('未持有该主播的粉丝牌，不佩戴');
       }
     } catch (e) {
       debugPrint('auto wear fans medal error: $e');
+      _medalToast('粉丝牌信息获取失败');
     }
+  }
+
+  void _medalToast(String msg) {
+    if (!Get.isRegistered<LiveRoomController>()) return;
+    SmartDialog.showToast(msg);
   }
 
   /// 离开直播间：取下自动换上的粉丝牌，并恢复此前的佩戴
   Future<void> _restoreFansMedal() async {
     final worn = _autoWornMedalId;
     final prev = _prevWornMedalId;
+    final prevName = _prevWornMedalName;
     _autoWornMedalId = null;
     _prevWornMedalId = null;
+    _prevWornMedalName = null;
     if (userId == 0 || worn == null) return;
     // 开关中途被关闭时不做还原（用户可能自行佩戴，避免覆盖）
     final enabled = setting.get(SettingBoxKey.autoWearFansMedal,
@@ -570,10 +587,16 @@ class LiveRoomController extends GetxController {
     try {
       if (prev != null && prev != worn) {
         // 恢复之前佩戴的另一块粉丝牌
-        await LiveHttp.wearFansMedal(medalId: prev, status: 1);
+        final ok = await LiveHttp.wearFansMedal(medalId: prev, status: 1);
+        if (ok) {
+          _medalToast('已还原粉丝牌${prevName != null ? '「$prevName」' : ''}');
+        }
       } else {
         // 之前没佩戴（或戴的就是这块）：取下
-        await LiveHttp.wearFansMedal(medalId: 0, status: 0);
+        final ok = await LiveHttp.wearFansMedal(medalId: 0, status: 0);
+        if (ok) {
+          _medalToast('已取下粉丝牌，恢复未佩戴状态');
+        }
       }
     } catch (_) {}
   }
