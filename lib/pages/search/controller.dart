@@ -5,6 +5,7 @@ import 'package:hive/hive.dart';
 import 'package:pilipala/http/search.dart';
 import 'package:pilipala/models/search/hot.dart';
 import 'package:pilipala/models/search/suggest.dart';
+import 'package:pilipala/utils/keyword_filter.dart';
 import 'package:pilipala/utils/simple_mode_service.dart';
 import 'package:pilipala/utils/storage.dart';
 
@@ -87,7 +88,15 @@ class SSearchController extends GetxController {
   Future queryHotSearchList() async {
     var result = await SearchHttp.hotSearchList();
     if (result['status']) {
-      hotSearchList.value = result['data'].list;
+      // 热搜词命中关键词屏蔽（原样词/正则/黑名单用户名）时隐藏
+      final List<HotSearchItem> visible = (result['data'].list as List)
+          .where((item) => !KeywordFilter.shouldBlock(
+                title: item.keyword,
+                description: item.showName,
+              ))
+          .map<HotSearchItem>((item) => item)
+          .toList();
+      hotSearchList.value = visible;
     }
     return result;
   }

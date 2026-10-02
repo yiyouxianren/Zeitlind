@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:developer';
 import 'package:hive/hive.dart';
@@ -460,6 +461,7 @@ class VideoHttp {
         await BlacklistCache.remove(mid);
         await BlacklistCache.removeName(mid);
       }
+      unawaited(BlacklistSync.refresh());
       return {'status': true, 'data': res.data['data'], 'msg': '成功'};
     } else {
       return {'status': false, 'data': [], 'msg': res.data['message']};

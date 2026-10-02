@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:pilipala/http/search.dart';
 import 'package:pilipala/models/common/search_type.dart';
+import 'package:pilipala/models/search/result.dart';
 import 'package:pilipala/utils/blacklist_filter.dart';
 import 'package:pilipala/utils/id_utils.dart';
 import 'package:pilipala/utils/utils.dart';
@@ -20,9 +23,47 @@ class SearchPanelController extends GetxController {
   // 视频分区筛选 仅用于搜索视频 -1时不传
   RxInt tids = (-1).obs;
 
+  // 综合搜索返回的置顶 UP 主（独立请求，不阻塞视频列表）
+  RxList pinnedUsers = [].obs;
+  bool _pinnedLoaded = false;
+  StreamSubscription<Set<int>>? _blacklistSub;
+
+  @override
+  void onInit() {
+    super.onInit();
+    // 黑名单变化（拉黑/移除/服务端同步）时，实时更新已渲染的列表
+    _blacklistSub = BlacklistUpdateBus.stream.listen((_) => _onBlacklistChanged());
+  }
+
+  @override
+  void onClose() {
+    _blacklistSub?.cancel();
+    super.onClose();
+  }
+
+  void _onBlacklistChanged() {
+    _reapplyPinned();
+    final filtered = _filterVideos(resultList);
+    if (filtered.length != resultList.length) {
+      resultList.value = filtered;
+    }
+  }
+
+  /// 结果中的视频条目（含黑名单 UP 的）实时过滤
+  List _filterVideos(List list) {
+    return list
+        .where((item) =>
+            item is SearchUserItemModel ||
+            !BlacklistFilter.isBlocked(item is SearchVideoItemModel
+                ? (item.mid ?? item.owner?.mid)
+                : null))
+        .toList();
+  }
+
   Future onSearch({type = 'init'}) async {
-    // 视频结果页首屏：并行拉取综合搜索，取置顶 UP 主卡片插到列表头部
-    if (type == 'init' && searchType == SearchType.video) {
+    // 视频结果页首屏/刷新：并行拉取综合搜索，取置顶 UP 主卡片插到列表头部
+    if ((type == 'init' || type == 'onRefresh') &&
+        searchType == SearchType.video) {
       queryPinnedUsers();
     }
     var result = await SearchHttp.searchByType(
@@ -40,16 +81,16 @@ class SearchPanelController extends GetxController {
         _applyPinned(result['data'].list ?? []);
       } else {
         resultList.addAll(result['data'].list ?? []);
+        if (type == 'init') {
+          // 首屏后置 UP 卡片若已就绪需合并一次
+          _reapplyPinned();
+        }
       }
       page.value++;
       onPushDetail(keyword, resultList);
     }
     return result;
   }
-
-  // 综合搜索返回的置顶 UP 主（独立请求，不阻塞视频列表）
-  RxList pinnedUsers = [].obs;
-  bool _pinnedLoaded = false;
 
   Future<void> queryPinnedUsers() async {
     if (_pinnedLoaded) return;
@@ -68,7 +109,7 @@ class SearchPanelController extends GetxController {
             pinnedUsers.value = visible.take(3).toList();
             // 若视频列表已就绪，把 UP 主卡片插到最前
             if (resultList.isNotEmpty) {
-              _applyPinned(List.from(resultList));
+              _reapplyPinned();
             }
           }
         }
@@ -78,15 +119,29 @@ class SearchPanelController extends GetxController {
     }
   }
 
-  /// 把置顶 UP 主合并进结果列表头部（去重，避免重复插入）。
-  void _applyPinned(List baseList) {
+  /// 把置顶 UP 主卡片合并进结果列表头部（幂等，可重复调用）。
+  void _reapplyPinned() {
+    final videos = _filterVideos(
+      resultList.where((i) => i is! SearchUserItemModel).toList(),
+    );
     if (pinnedUsers.isEmpty) {
-      resultList.value = baseList;
+      if (resultList.length != videos.length) {
+        resultList.value = videos;
+      }
       return;
     }
-    final merged = [...pinnedUsers, ...baseList];
-    // 用户 item 是 SearchUserItemModel，视频是 SearchVideoItemModel，类型天然可区分
+    final merged = [...pinnedUsers, ...videos];
     resultList.value = merged;
+  }
+
+  /// 仅在刷新拿到新数据时调用：以新列表为基座重插置顶卡片
+  void _applyPinned(List baseList) {
+    final videos = _filterVideos(baseList);
+    if (pinnedUsers.isEmpty) {
+      resultList.value = videos;
+      return;
+    }
+    resultList.value = [...pinnedUsers, ...videos];
   }
 
   Future onRefresh() async {

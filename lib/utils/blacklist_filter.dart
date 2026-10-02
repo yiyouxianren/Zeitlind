@@ -1,4 +1,6 @@
-import 'package:hive/hive.dart';
+import 'dart:async';
+
+import 'package:pilipala/http/black.dart';
 import 'package:pilipala/utils/storage.dart';
 
 class BlacklistFilter {
@@ -45,17 +47,80 @@ class BlacklistFilter {
   }
 }
 
+/// 黑名单变动的事件总线：本地拉黑/移除后广播，
+/// 让已渲染的列表（搜索置顶卡片等）无需重进页面即可同步过滤。
+class BlacklistUpdateBus {
+  BlacklistUpdateBus._();
+
+  static final StreamController<Set<int>> _controller =
+      StreamController<Set<int>>.broadcast();
+
+  static Stream<Set<int>> get stream => _controller.stream;
+
+  static void notify() {
+    if (!_controller.isClosed) {
+      _controller.add(BlacklistFilter.blackMids);
+    }
+  }
+}
+
+/// 从服务端全量同步黑名单（拉黑/移除操作后校准，
+/// 覆盖其他设备或在网页端做的改动），结果写入本地缓存并广播。
+class BlacklistSync {
+  const BlacklistSync._();
+
+  static bool _running = false;
+
+  static Future<void> refresh() async {
+    if (_running) return;
+    _running = true;
+    try {
+      int pn = 1;
+      final Map<int, String> serverEntries = {};
+      while (true) {
+        final res = await BlackHttp.blackList(pn: pn, ps: 50);
+        if (res['status'] != true) break;
+        final list = res['data'].list ?? const <dynamic>[];
+        if (list.isEmpty) break;
+        for (final item in list) {
+          final mid = item.mid;
+          if (mid != null) serverEntries[mid] = item.uname ?? '';
+        }
+        if (serverEntries.length >= (res['data'].total ?? 0)) break;
+        pn++;
+      }
+      if (serverEntries.isNotEmpty) {
+        // 以服务端为准覆写本地 mids 与名称缓存
+        await GStrorage.setting
+            .put(SettingBoxKey.blackMidsList, serverEntries.keys.toList());
+        final Map<dynamic, dynamic> names = {};
+        serverEntries.forEach((mid, name) {
+          if (name.trim().isNotEmpty) names[mid] = name.trim();
+        });
+        await GStrorage.setting.put(SettingBoxKey.blacklistNames, names);
+        BlacklistUpdateBus.notify();
+      }
+    } catch (_) {
+      // 网络异常时保留本地缓存，下次操作后再同步
+    } finally {
+      _running = false;
+    }
+  }
+}
+
 class BlacklistCache {
   const BlacklistCache._();
 
   static Future<void> add(int mid) async {
     final mids = BlacklistFilter.blackMids..add(mid);
     await GStrorage.setting.put(SettingBoxKey.blackMidsList, mids.toList());
+    BlacklistUpdateBus.notify();
   }
 
   static Future<void> remove(int mid) async {
     final mids = BlacklistFilter.blackMids..remove(mid);
     await GStrorage.setting.put(SettingBoxKey.blackMidsList, mids.toList());
+    BlacklistUpdateBus.notify();
   }
 
   static Future<void> addName(int mid, String name) async {

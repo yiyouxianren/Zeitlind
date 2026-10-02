@@ -1,14 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
 import 'package:get/get.dart';
-import 'package:hive/hive.dart';
 import 'package:pilipala/common/widgets/http_error.dart';
 import 'package:pilipala/common/widgets/network_img_layer.dart';
 import 'package:pilipala/http/black.dart';
 import 'package:pilipala/models/user/black.dart';
-import 'package:pilipala/utils/keyword_filter.dart';
 import 'package:pilipala/utils/blacklist_filter.dart';
-import 'package:pilipala/utils/storage.dart';
 import 'package:pilipala/utils/utils.dart';
 
 class BlackListPage extends StatefulWidget {
@@ -24,7 +21,6 @@ class _BlackListPageState extends State<BlackListPage> {
   final ScrollController scrollController = ScrollController();
   Future? _futureBuilderFuture;
   bool _isLoadingMore = false;
-  Box setting = GStrorage.setting;
 
   @override
   void initState() {
@@ -46,9 +42,8 @@ class _BlackListPageState extends State<BlackListPage> {
 
   @override
   void dispose() {
-    List<int> blackMidsList =
-        _blackListController.blackList.map<int>((e) => e.mid!).toList();
-    setting.put(SettingBoxKey.blackMidsList, blackMidsList);
+    // 缓存已由 BlacklistCache 实时写入，dispose 不再整表覆写，
+    // 避免用当前页内存数据覆盖其他入口（视频卡片/用户页）刚拉黑的用户
     scrollController.removeListener(() {});
     super.dispose();
   }
@@ -169,6 +164,19 @@ class BlackListController extends GetxController {
       }
 
       currentPage += 1;
+      // 拉全服务端黑名单后与本地缓存对齐：已不存在的条目从缓存移除
+      // （未拉全时分页未完，不做校准，避免误删后续页条目）
+      final int serverTotal = total.value;
+      if (blackList.length >= serverTotal) {
+        final loaded = blackList.map<int?>((e) => e.mid).toSet();
+        final stale = BlacklistFilter.blackMids
+            .difference(loaded.whereType<int>().toSet())
+            .difference(const {-1});
+        for (final mid in stale) {
+          await BlacklistCache.remove(mid);
+          await BlacklistCache.removeName(mid);
+        }
+      }
     }
     return result;
   }
