@@ -600,12 +600,14 @@ class LiveRoomController extends GetxController {
     try {
       final medals = await LiveHttp.fansMedalList();
       if (medals.isEmpty) {
+        // code==0 且列表为空：账号确实没有粉丝牌（含变灰但未过期的）
         medalError.value = '暂无粉丝牌';
       } else {
         medalList.assignAll(medals);
         _medalListLoaded = true;
       }
     } catch (e) {
+      // 接口异常（未登录/CSRF失效/风控）：展示具体原因 + 重试
       medalError.value = '粉丝牌获取失败: $e';
     } finally {
       medalLoading.value = false;

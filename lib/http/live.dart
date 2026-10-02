@@ -328,6 +328,7 @@ class LiveHttp {
   }
 
   /// 我的粉丝牌列表：返回 [{medal_id, anchor_uid(=target_id), medal_name, level, status(1=佩戴中), ...}]
+  /// 返回 code!=0 时抛出带信息的异常，便于上层区分“没有粉丝牌”和“接口异常”。
   static Future<List<Map<String, dynamic>>> fansMedalList() async {
     final List<Map<String, dynamic>> medals = [];
     int page = 1;
@@ -342,9 +343,18 @@ class LiveHttp {
           'csrf': csrf,
           'csrf_token': csrf,
         },
+        extra: {
+          'ua': 'pc',
+          'referer': 'https://live.bilibili.com/',
+        },
       );
       final body = res.data;
-      if (body is! Map || body['code'] != 0) break;
+      if (body is! Map || body['code'] != 0) {
+        final code = body is Map ? body['code'] : null;
+        final msg = body is Map ? (body['message'] ?? '') : '响应格式异常';
+        // -101 未登录 / -111 csrf 失效 / -352 风控：明确抛错而非当作“暂无”
+        throw Exception('粉丝牌接口返回异常 code=$code: $msg');
+      }
       final data = body['data'];
       final List? list = data is Map ? data['list'] : null;
       if (list == null || list.isEmpty) break;
