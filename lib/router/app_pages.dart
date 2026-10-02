@@ -59,6 +59,7 @@ import '../pages/setting/pages/navigation_bar_set.dart';
 import '../pages/setting/pages/play_gesture_set.dart';
 import '../pages/setting/pages/play_speed_set.dart';
 import '../pages/setting/recommend_setting.dart';
+import '../pages/setting/live_setting.dart';
 import '../pages/setting/play_setting.dart';
 import '../pages/setting/privacy_setting.dart';
 import '../pages/setting/unfollow_setting.dart';
@@ -123,6 +124,8 @@ class Routes {
         name: '/recommendSetting', page: () => const RecommendSetting()),
     // 播放设置
     CustomGetPage(name: '/playSetting', page: () => const PlaySetting()),
+    // 直播设置
+    CustomGetPage(name: '/liveSetting', page: () => const LiveSetting()),
     // 外观设置
     CustomGetPage(name: '/styleSetting', page: () => const StyleSetting()),
     // 隐私设置

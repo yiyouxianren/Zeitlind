@@ -100,6 +100,9 @@ class SettingBoxKey {
       enableAudioMode = 'enableAudioMode',
       fullScreenGestureMode = 'fullScreenGestureMode',
 
+      /// 直播
+      autoWearFansMedal = 'autoWearFansMedal',
+
       /// 隐私
       blackMidsList = 'blackMidsList',
       enableBlacklistFilter = 'enableBlacklistFilter',

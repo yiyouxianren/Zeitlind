@@ -36,6 +36,11 @@ class SettingPage extends StatelessWidget {
             title: const Text('播放设置'),
           ),
           ListTile(
+            onTap: () => Get.toNamed('/liveSetting'),
+            dense: false,
+            title: const Text('直播设置'),
+          ),
+          ListTile(
             onTap: () => Get.toNamed('/unfollowSetting'),
             dense: false,
             title: const Text('批量取关'),

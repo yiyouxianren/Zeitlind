@@ -519,6 +519,10 @@ class LiveRoomController extends GetxController {
 
   Future<void> _autoWearFansMedal() async {
     if (userId == 0) return; // 未登录
+    // 设置开关：直播设置 → 自动佩戴粉丝牌
+    final enabled = setting.get(SettingBoxKey.autoWearFansMedal,
+        defaultValue: true) as bool;
+    if (!enabled) return;
     try {
       final anchorUid = roomInfoH5.value.roomInfo?.uid;
       if (anchorUid == null) return;
@@ -559,6 +563,10 @@ class LiveRoomController extends GetxController {
     _autoWornMedalId = null;
     _prevWornMedalId = null;
     if (userId == 0 || worn == null) return;
+    // 开关中途被关闭时不做还原（用户可能自行佩戴，避免覆盖）
+    final enabled = setting.get(SettingBoxKey.autoWearFansMedal,
+        defaultValue: true) as bool;
+    if (!enabled) return;
     try {
       if (prev != null && prev != worn) {
         // 恢复之前佩戴的另一块粉丝牌
