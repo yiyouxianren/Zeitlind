@@ -6,7 +6,6 @@ import 'package:pilipala/http/video.dart';
 import 'package:pilipala/models/user/fav_detail.dart';
 import 'package:pilipala/models/user/fav_folder.dart';
 import 'package:pilipala/pages/fav/index.dart';
-import 'package:pilipala/utils/utils.dart';
 
 class FavDetailController extends GetxController {
   FavFolderItemData? item;
@@ -190,23 +189,5 @@ class FavDetailController extends GetxController {
     );
     title.value = res['title'];
     print(title);
-  }
-
-  Future toViewPlayAll() async {
-    final FavDetailItemData firstItem = favList.first;
-    final String heroTag = Utils.makeHeroTag(firstItem.bvid);
-    Get.toNamed(
-      '/video?bvid=${firstItem.bvid}&cid=${firstItem.cid}',
-      arguments: {
-        'videoItem': firstItem,
-        'heroTag': heroTag,
-        'sourceType': 'fav',
-        'mediaId': favInfo['id'],
-        'oid': firstItem.id,
-        'favTitle': favInfo['title'],
-        'favInfo': favInfo,
-        'count': favInfo['media_count'],
-      },
-    );
   }
 }
