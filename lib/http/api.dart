@@ -69,6 +69,9 @@ class Api {
   // https://api.bilibili.com/x/v3/fav/resource/deal
   static const String favVideo = '/x/v3/fav/resource/deal';
 
+  /// 批量取消收藏（resources 格式：{avid}:2 逗号分隔）
+  static const String favBatchDel = '/x/v3/fav/resource/batch-del';
+
   // 判断视频是否被收藏（双端）GET
   /// aid
   // https://api.bilibili.com/x/v2/fav/video/favoured

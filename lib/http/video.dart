@@ -370,6 +370,33 @@ class VideoHttp {
     }
   }
 
+  /// 批量取消收藏（官方 batch-del 接口）：
+  /// [aids] 为视频稿件 avid 列表，一次请求全部移出目标收藏夹。
+  static Future<Map<String, dynamic>> favBatchDel(
+      {required List<int> aids, required int mediaId}) async {
+    if (aids.isEmpty) {
+      return {'status': false, 'msg': '未选择视频'};
+    }
+    final resources = aids.map((aid) => '$aid:2').join(',');
+    var res = await Request().post(
+      Api.favBatchDel,
+      data: {
+        'resources': resources,
+        'media_id': mediaId,
+        'platform': 'web',
+        'csrf': await Request.getCsrf(),
+      },
+    );
+    if (res.data is Map && res.data['code'] == 0) {
+      return {'status': true, 'msg': '移除成功'};
+    }
+    return {
+      'status': false,
+      'msg':
+          '移除失败${res.data is Map && res.data['message'] != null ? '：${res.data['message']}' : ''}',
+    };
+  }
+
   // 查看视频被收藏在哪个文件夹
   static Future videoInFolder({required int mid, required int rid}) async {
     var res = await Request()

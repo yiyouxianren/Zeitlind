@@ -22,6 +22,11 @@ class FavSearchController extends GetxController {
   int count = 0; // 总数
   RxList<FavDetailItemData> favList = <FavDetailItemData>[].obs;
 
+  /// 批量移除多选模式（仅 searchType==0 即指定收藏夹内搜索时可用）
+  RxBool batchMode = false.obs;
+  RxList<int> selectedAids = <int>[].obs;
+  RxBool batchRemoving = false.obs;
+
   @override
   void onInit() {
     super.onInit();
@@ -88,6 +93,57 @@ class FavSearchController extends GetxController {
         }
       }
       SmartDialog.showToast('取消收藏');
+    }
+  }
+
+  // ============ 批量移除（官方 batch-del 接口） ============
+
+  /// 是否允许批量操作：仅“指定收藏夹内搜索”（searchType==0）时可用
+  bool get canBatch => searchType == 0;
+
+  void toggleBatchMode() {
+    batchMode.value = !batchMode.value;
+    if (!batchMode.value) {
+      selectedAids.clear();
+    }
+  }
+
+  void toggleSelect(int aid) {
+    if (selectedAids.contains(aid)) {
+      selectedAids.remove(aid);
+    } else {
+      selectedAids.add(aid);
+    }
+  }
+
+  void selectAll() {
+    if (selectedAids.length == favList.length && favList.isNotEmpty) {
+      selectedAids.clear();
+    } else {
+      selectedAids.value = favList.map((e) => e.id!).toList();
+    }
+  }
+
+  /// 批量移除勾选的视频：一次请求官方批量取消收藏接口
+  Future<void> removeSelected() async {
+    if (batchRemoving.value || selectedAids.isEmpty) return;
+    batchRemoving.value = true;
+    try {
+      final res = await VideoHttp.favBatchDel(
+        aids: selectedAids.toList(),
+        mediaId: mediaId,
+      );
+      SmartDialog.showToast(res['msg']);
+      if (res['status'] == true) {
+        // 从当前搜索结果中移除已删条目，保持列表与搜索上下文一致
+        favList.removeWhere((e) => selectedAids.contains(e.id));
+        count = favList.length;
+        selectedAids.clear();
+        batchMode.value = false;
+        favList.refresh();
+      }
+    } finally {
+      batchRemoving.value = false;
     }
   }
 }

@@ -6,7 +6,6 @@ import 'package:pilipala/common/widgets/stat/danmu.dart';
 import 'package:pilipala/common/widgets/stat/view.dart';
 import 'package:pilipala/http/search.dart';
 import 'package:pilipala/http/video.dart';
-import 'package:pilipala/pages/fav_detail/controller.dart';
 import 'package:pilipala/models/common/search_type.dart';
 import 'package:pilipala/utils/id_utils.dart';
 import 'package:pilipala/utils/image_save.dart';
@@ -20,7 +19,7 @@ import '../../../common/widgets/badge.dart';
 //  外层 Obx 惰性求值会吞掉子 Obx 的依赖收集，勾选后界面不变）
 class FavVideoCardH extends StatefulWidget {
   final dynamic videoItem;
-  final FavDetailController? batchCtr;
+  final dynamic batchCtr;
   final Function? callFn;
   final int? searchType;
   final String isOwner;
