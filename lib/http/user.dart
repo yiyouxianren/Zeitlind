@@ -108,6 +108,29 @@ class UserHttp {
     }
   }
 
+  /// 清空收藏夹内所有失效内容（官方一键清理接口）
+  /// 返回 {status, msg}
+  static Future<Map<String, dynamic>> cleanFavResource(
+      {required int mediaId}) async {
+    var res = await Request().post(
+      Api.cleanFavResource,
+      data: {
+        'media_id': mediaId,
+        'csrf': await Request.getCsrf(),
+        'platform': 'web',
+      },
+    );
+    final body = res.data;
+    if (body is Map && body['code'] == 0) {
+      return {'status': true, 'msg': '清理成功'};
+    }
+    return {
+      'status': false,
+      'msg':
+          '清理失败${body is Map && body['message'] != null ? '：${body['message']}' : ''}',
+    };
+  }
+
   // 稍后再看
   static Future<dynamic> seeYouLater() async {
     var res = await Request().get(Api.seeYouLater);

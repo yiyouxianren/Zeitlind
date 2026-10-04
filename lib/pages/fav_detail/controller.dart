@@ -119,55 +119,21 @@ class FavDetailController extends GetxController {
     return count;
   }
 
-  /// 一键移除失效视频：逐个调用取消收藏接口（同 onCancelFav），
-  /// 全部完成后重置列表回到第 1 页。
+  /// 一键移除失效视频：调用官方“清空失效内容”接口（一次请求完成），
+  /// 成功后重置列表回到第 1 页。
   Future<void> removeAllInvalidVideos() async {
     if (removingInvalid.value) return;
     removingInvalid.value = true;
+    invalidProgress.value = '正在清理失效视频...';
     try {
-      // 收集全量失效 aid（翻页拉全，含未加载部分）
-      final invalidAids = <int>[];
-      int pn = 1;
-      const int ps = 20;
-      while (true) {
-        var res = await UserHttp.userFavFolderDetail(
-          pn: pn,
-          ps: ps,
-          mediaId: mediaId!,
-        );
-        if (res['status'] != true) break;
-        final medias = res['data'].medias as List;
-        if (medias.isEmpty) break;
-        for (final e in medias.whereType<FavDetailItemData>()) {
-          if (e.isInvalid && e.id != null) invalidAids.add(e.id!);
-        }
-        if (medias.length < ps) break;
-        pn++;
+      final res = await UserHttp.cleanFavResource(mediaId: mediaId!);
+      SmartDialog.showToast(res['msg']);
+      if (res['status'] == true) {
+        // 重置回第 1 页重新加载
+        currentPage = 1;
+        favList.clear();
+        await queryUserFavFolderDetail(type: 'init');
       }
-      if (invalidAids.isEmpty) {
-        SmartDialog.showToast('没有发现失效视频');
-        return;
-      }
-      int removed = 0;
-      int failed = 0;
-      for (final aid in invalidAids) {
-        invalidProgress.value = '正在移除失效视频 ${removed + failed + 1}/${invalidAids.length}';
-        var result = await VideoHttp.favVideo(
-            aid: aid, addIds: '', delIds: mediaId.toString());
-        if (result['status'] == true) {
-          removed++;
-        } else {
-          failed++;
-        }
-        // 取消收藏接口无需风控间隔，短暂让出事件循环
-        await Future.delayed(const Duration(milliseconds: 200));
-      }
-      SmartDialog.showToast(
-          '已移除 $removed 个失效视频${failed > 0 ? '，失败 $failed 个' : ''}');
-      // 重置回第 1 页重新加载
-      currentPage = 1;
-      favList.clear();
-      await queryUserFavFolderDetail(type: 'init');
     } finally {
       removingInvalid.value = false;
       invalidProgress.value = '';

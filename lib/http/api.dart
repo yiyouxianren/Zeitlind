@@ -146,6 +146,9 @@ class Api {
   // https://api.bilibili.com/x/v3/fav/resource/list?media_id=76614671&pn=1&ps=20&keyword=&order=mtime&type=0&tid=0
   static const String userFavFolderDetail = '/x/v3/fav/resource/list';
 
+  /// 清空收藏夹内所有失效内容（官方一键清理接口）
+  static const String cleanFavResource = '/x/v3/fav/resource/clean';
+
   // 正在直播的up & 关注的up
   // https://api.bilibili.com/x/polymer/web-dynamic/v1/portal
   static const String followUp = '/x/polymer/web-dynamic/v1/portal';
