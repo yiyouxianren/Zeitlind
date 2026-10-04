@@ -68,6 +68,9 @@ class FavDetailItemData {
   int? cid;
   String? epId;
 
+  /// 收藏夹中该条目是否为失效视频（attr 位标志 1<<9；标题显示“已失效视频”）
+  bool get isInvalid => (attr ?? 0) & 0x200 != 0;
+
   FavDetailItemData.fromJson(Map<String, dynamic> json) {
     id = json['id'];
     type = json['type'];

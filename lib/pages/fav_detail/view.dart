@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:easy_debounce/easy_throttle.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
 import 'package:get/get.dart';
 import 'package:pilipala/common/skeleton/video_card_h.dart';
 import 'package:pilipala/common/widgets/http_error.dart';
@@ -56,6 +57,49 @@ class _FavDetailPageState extends State<FavDetailPage> {
     _controller.dispose();
     titleStreamC.close();
     super.dispose();
+  }
+
+  /// 一键移除失效视频：先统计数量，确认后执行
+  Future<void> _onRemoveInvalidVideos(BuildContext context) async {
+    SmartDialog.showLoading(msg: '正在检查失效视频...');
+    int count = 0;
+    try {
+      count = await _favDetailController.countInvalidVideos();
+    } catch (_) {
+      count = _favDetailController.invalidCount;
+    }
+    SmartDialog.dismiss();
+    if (!mounted) return;
+    if (count == 0) {
+      SmartDialog.showToast('没有发现失效视频');
+      return;
+    }
+    SmartDialog.show(
+      useSystem: true,
+      animationType: SmartAnimationType.centerFade_otherSlide,
+      builder: (BuildContext ctx) {
+        return AlertDialog(
+          title: const Text('提示'),
+          content: Text('检测到 $count 个失效视频，确定全部移除吗？'),
+          actions: [
+            TextButton(
+              onPressed: () => SmartDialog.dismiss(),
+              child: Text(
+                '点错了',
+                style: TextStyle(color: Theme.of(ctx).colorScheme.outline),
+              ),
+            ),
+            TextButton(
+              onPressed: () async {
+                SmartDialog.dismiss();
+                await _favDetailController.removeAllInvalidVideos();
+              },
+              child: const Text('确认移除'),
+            ),
+          ],
+        );
+      },
+    );
   }
 
   @override
@@ -135,6 +179,14 @@ class _FavDetailPageState extends State<FavDetailPage> {
                     value: 'pause',
                     child: const Text('删除收藏夹'),
                   ),
+                  // 一键移除失效视频（仅自己的收藏夹）
+                  if (_favDetailController.isOwner.value)
+                    PopupMenuItem<String>(
+                      onTap: () => _onRemoveInvalidVideos(context),
+                      value: 'removeInvalid',
+                      enabled: !_favDetailController.removingInvalid.value,
+                      child: const Text('一键移除失效视频'),
+                    ),
                 ],
               ),
               const SizedBox(width: 14),
@@ -280,7 +332,9 @@ class _FavDetailPageState extends State<FavDetailPage> {
               child: Center(
                 child: Obx(
                   () => Text(
-                    _favDetailController.loadingText.value,
+                    _favDetailController.removingInvalid.value
+                        ? _favDetailController.invalidProgress.value
+                        : _favDetailController.loadingText.value,
                     style: TextStyle(
                         color: Theme.of(context).colorScheme.outline,
                         fontSize: 13),
