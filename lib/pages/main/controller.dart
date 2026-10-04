@@ -9,7 +9,6 @@ import 'package:pilipala/http/common.dart';
 import 'package:pilipala/utils/blacklist_filter.dart';
 import 'package:pilipala/utils/simple_mode_service.dart';
 import 'package:pilipala/utils/unfollow_service.dart';
-import 'package:pilipala/utils/unfav_service.dart';
 import 'package:pilipala/utils/batch_download_service.dart';
 import 'package:pilipala/utils/storage.dart';
 import 'package:pilipala/utils/utils.dart';
@@ -46,10 +45,6 @@ class MainController extends GetxController {
     // 批量取关服务（前台定时移除）
     if (!Get.isRegistered<UnfollowService>()) {
       Get.put(UnfollowService());
-    }
-    // 批量移除收藏服务（前台定时移除）
-    if (!Get.isRegistered<UnfavService>()) {
-      Get.put(UnfavService());
     }
     // 合集批量下载服务（支持后台下载）
     if (!Get.isRegistered<BatchDownloadService>()) {

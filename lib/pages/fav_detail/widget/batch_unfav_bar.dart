@@ -2,19 +2,45 @@ import 'package:flutter/material.dart';
 import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
 import 'package:get/get.dart';
 import 'package:pilipala/pages/fav_detail/controller.dart';
-import 'package:pilipala/utils/id_utils.dart';
-import 'package:pilipala/utils/unfav_service.dart';
 
-/// 批量移除收藏底部操作栏（两行布局，与批量取关一致）：
-/// 第一行：名单状态 + 清空名单 + 退出多选
-/// 第二行：全选 / 加入名单 / 开始·暂停
+/// 批量移除收藏底部操作栏（官方 batch-del 接口，单次请求完成）：
+/// 第一行：已选计数 + 退出多选
+/// 第二行：全选 / 移除所选
 class BatchUnfavBar extends StatelessWidget {
   final FavDetailController ctr;
   const BatchUnfavBar({super.key, required this.ctr});
 
+  Future<void> _confirmRemove(BuildContext context) async {
+    SmartDialog.show(
+      useSystem: true,
+      animationType: SmartAnimationType.centerFade_otherSlide,
+      builder: (BuildContext ctx) {
+        return AlertDialog(
+          title: const Text('提示'),
+          content: Text('确定移除选中的 ${ctr.selectedAids.length} 个视频吗？'),
+          actions: [
+            TextButton(
+              onPressed: () => SmartDialog.dismiss(),
+              child: Text(
+                '点错了',
+                style: TextStyle(color: Theme.of(ctx).colorScheme.outline),
+              ),
+            ),
+            TextButton(
+              onPressed: () async {
+                SmartDialog.dismiss();
+                await ctr.removeSelected();
+              },
+              child: const Text('确认移除'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final UnfavService svc = UnfavService.instance;
     return Obx(
       () => Container(
         padding: EdgeInsets.fromLTRB(
@@ -29,33 +55,18 @@ class BatchUnfavBar extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // ---- 第一行：名单状态与全局操作 ----
+            // ---- 第一行：已选计数与退出多选 ----
             Row(
               children: [
                 Expanded(
                   child: Text(
-                    '已选 ${ctr.selectedAids.length} · '
-                    '待移除 ${svc.pendingList.length}'
-                    '${svc.running.value ? "（进行中）" : ""}',
+                    '已选 ${ctr.selectedAids.length} 个视频',
                     style: TextStyle(
                       fontSize: 12,
                       color: Theme.of(context).colorScheme.outline,
                     ),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                TextButton.icon(
-                  onPressed: svc.pendingList.isEmpty || svc.running.value
-                      ? null
-                      : () {
-                          svc.clearPending();
-                          SmartDialog.showToast('已清空待移除名单');
-                        },
-                  icon: const Icon(Icons.delete_sweep_outlined, size: 18),
-                  label: const Text('清空名单'),
-                  style: TextButton.styleFrom(
-                    visualDensity: VisualDensity.compact,
                   ),
                 ),
                 IconButton(
@@ -68,7 +79,7 @@ class BatchUnfavBar extends StatelessWidget {
                 ),
               ],
             ),
-            // ---- 第二行：选择与执行 ----
+            // ---- 第二行：全选 / 移除所选 ----
             Row(
               children: [
                 Expanded(
@@ -83,53 +94,32 @@ class BatchUnfavBar extends StatelessWidget {
                       }
                     },
                     icon: const Icon(Icons.select_all_outlined, size: 20),
-                    label: Text(
-                      ctr.favList.isNotEmpty &&
-                              ctr.selectedAids.length == ctr.favList.length
-                          ? '取消全选'
-                          : '全选',
+                    label: Obx(
+                      () => Text(
+                        ctr.favList.isNotEmpty &&
+                                ctr.selectedAids.length == ctr.favList.length
+                            ? '取消全选'
+                            : '全选',
+                      ),
                     ),
-                  ),
-                ),
-                Expanded(
-                  child: FilledButton.icon(
-                    onPressed: ctr.selectedAids.isEmpty
-                        ? null
-                        : () {
-                            final mediaId = ctr.mediaId!;
-                            final items = ctr.favList
-                                .where((e) => ctr.selectedAids.contains(e.id))
-                                .map((e) => <String, dynamic>{
-                                      'aid': e.id!,
-                                      'bvid': e.bvid ?? IdUtils.av2bv(e.id!),
-                                      'title': e.title ?? '',
-                                      'mediaId': mediaId,
-                                    })
-                                .toList();
-                            svc.addPending(items);
-                            SmartDialog.showToast('已加入名单：+${items.length}');
-                          },
-                    icon: const Icon(Icons.playlist_add_check_outlined,
-                        size: 18),
-                    label: const Text('加入名单'),
                   ),
                 ),
                 const SizedBox(width: 6),
                 Expanded(
-                  child: svc.running.value
-                      ? FilledButton.tonalIcon(
-                          onPressed: () => svc.stop(),
-                          icon: const Icon(Icons.pause_circle_outline,
-                              size: 18),
-                          label: const Text('暂停'),
-                        )
-                      : FilledButton.icon(
-                          onPressed: svc.pendingList.isEmpty
-                              ? null
-                              : () => svc.start(),
-                          icon: const Icon(Icons.play_arrow, size: 18),
-                          label: const Text('开始'),
-                        ),
+                  child: FilledButton.icon(
+                    onPressed: ctr.selectedAids.isEmpty ||
+                            ctr.batchRemoving.value
+                        ? null
+                        : () => _confirmRemove(context),
+                    icon: ctr.batchRemoving.value
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.delete_outline, size: 18),
+                    label: Text('移除所选 (${ctr.selectedAids.length})'),
+                  ),
                 ),
               ],
             ),

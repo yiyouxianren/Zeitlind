@@ -46,11 +46,6 @@ class SettingPage extends StatelessWidget {
             title: const Text('批量取关'),
           ),
           ListTile(
-            onTap: () => Get.toNamed('/unfavSetting'),
-            dense: false,
-            title: const Text('批量移除收藏'),
-          ),
-          ListTile(
             onTap: () => Get.toNamed('/styleSetting'),
             dense: false,
             title: const Text('外观设置'),

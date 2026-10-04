@@ -118,6 +118,33 @@ class FavDetailController extends GetxController {
     return count;
   }
 
+  // ============ 批量移除勾选视频（官方 batch-del 接口） ============
+
+  /// 批量移除执行中（操作栏按钮禁用/loading 用）
+  RxBool batchRemoving = false.obs;
+
+  /// 批量移除勾选的视频：一次请求官方批量取消收藏接口
+  Future<void> removeSelected() async {
+    if (batchRemoving.value || selectedAids.isEmpty) return;
+    batchRemoving.value = true;
+    try {
+      final res = await VideoHttp.favBatchDel(
+        aids: selectedAids.toList(),
+        mediaId: mediaId!,
+      );
+      SmartDialog.showToast(res['msg']);
+      if (res['status'] == true) {
+        mediaCount.value -= selectedAids.length;
+        favList.removeWhere((e) => selectedAids.contains(e.id));
+        selectedAids.clear();
+        batchMode.value = false;
+        favList.refresh();
+      }
+    } finally {
+      batchRemoving.value = false;
+    }
+  }
+
   /// 一键移除失效视频：调用官方“清空失效内容”接口（一次请求完成），
   /// 成功后重置列表回到第 1 页。
   Future<void> removeAllInvalidVideos() async {

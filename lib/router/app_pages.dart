@@ -63,7 +63,6 @@ import '../pages/setting/live_setting.dart';
 import '../pages/setting/play_setting.dart';
 import '../pages/setting/privacy_setting.dart';
 import '../pages/setting/unfollow_setting.dart';
-import '../pages/setting/unfav_setting.dart';
 import '../pages/setting/style_setting.dart';
 import '../pages/subscription/index.dart';
 import '../pages/subscription_detail/index.dart';
@@ -131,7 +130,6 @@ class Routes {
     // 隐私设置
     CustomGetPage(name: '/privacySetting', page: () => const PrivacySetting()),
     CustomGetPage(name: '/unfollowSetting', page: () => const UnfollowSettingPage()),
-    CustomGetPage(name: '/unfavSetting', page: () => const UnfavSettingPage()),
     CustomGetPage(
         name: '/keywordBlockSetting',
         page: () => const KeywordBlockSettingPage()),

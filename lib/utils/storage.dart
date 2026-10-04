@@ -147,15 +147,7 @@ class SettingBoxKey {
       unfollowBatchCount = 'unfollowBatchCount',
       unfollowRestSec = 'unfollowRestSec',
       unfollowBaseSec = 'unfollowBaseSec',
-      unfollowRandMaxSec = 'unfollowRandMaxSec',
-
-      /// 批量移除收藏
-      unfavRuleType = 'unfavRuleType', // 0 等长 1 间歇 2 随机
-      unfavIntervalSec = 'unfavIntervalSec',
-      unfavBatchCount = 'unfavBatchCount',
-      unfavRestSec = 'unfavRestSec',
-      unfavBaseSec = 'unfavBaseSec',
-      unfavRandMaxSec = 'unfavRandMaxSec';
+      unfollowRandMaxSec = 'unfollowRandMaxSec';
 
   /// 外观
   static const String themeMode = 'themeMode',
