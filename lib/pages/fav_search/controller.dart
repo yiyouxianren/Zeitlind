@@ -81,6 +81,37 @@ class FavSearchController extends GetxController {
     searchFav(type: 'onLoad');
   }
 
+  /// 单个取消收藏（带确认弹窗，与收藏夹详情页一致）
+  /// [onConfirmed] 在用户确认后回调（由卡片层传入实际移除逻辑）
+  Future<void> confirmCancelFav(int id) async {
+    SmartDialog.show(
+      useSystem: true,
+      animationType: SmartAnimationType.centerFade_otherSlide,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('提示'),
+          content: const Text('要取消收藏吗?'),
+          actions: [
+            TextButton(
+              onPressed: () => SmartDialog.dismiss(),
+              child: Text(
+                '取消',
+                style: TextStyle(color: Theme.of(context).colorScheme.outline),
+              ),
+            ),
+            TextButton(
+              onPressed: () async {
+                SmartDialog.dismiss();
+                await onCancelFav(id);
+              },
+              child: const Text('确定取消'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   onCancelFav(int id) async {
     var result = await VideoHttp.favVideo(
         aid: id, addIds: '', delIds: mediaId.toString());

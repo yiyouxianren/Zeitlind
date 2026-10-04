@@ -102,28 +102,39 @@ class _FavSearchPageState extends State<FavSearchPage> {
                 },
               )
             : _favSearchCtr.favList.isNotEmpty
-                ? ListView.builder(
-                    controller: scrollController,
-                    itemCount: _favSearchCtr.favList.length + 1,
-                    itemBuilder: (context, index) {
-                      if (index == _favSearchCtr.favList.length) {
-                        return Container(
-                          height: MediaQuery.of(context).padding.bottom + 60,
-                          padding: EdgeInsets.only(
-                              bottom: MediaQuery.of(context).padding.bottom),
-                        );
-                      } else {
-                        return FavVideoCardH(
-                          videoItem: _favSearchCtr.favList[index],
-                          searchType: searchType,
-                          isOwner: '0',
-                          batchCtr: _favSearchCtr,
-                          callFn: () => searchType != 1
-                              ? _favSearchCtr
-                                  .onCancelFav(_favSearchCtr.favList[index].id!)
-                              : {},
-                        );
-                      }
+                ? Obx(
+                    // 触发依赖：batchMode 变化时重建列表（卡片显示/隐藏
+                    // 勾选框由此驱动；单个勾选的即时刷新由卡片自身 setState 完成）
+                    () {
+                      // ignore: unused_local_variable
+                      final bool batch = _favSearchCtr.batchMode.value;
+                      final List favList = _favSearchCtr.favList;
+                      return ListView.builder(
+                        controller: scrollController,
+                        itemCount: favList.length + 1,
+                        itemBuilder: (context, index) {
+                          if (index == favList.length) {
+                            return Container(
+                              height:
+                                  MediaQuery.of(context).padding.bottom + 60,
+                              padding: EdgeInsets.only(
+                                  bottom:
+                                      MediaQuery.of(context).padding.bottom),
+                            );
+                          } else {
+                            return FavVideoCardH(
+                              videoItem: favList[index],
+                              searchType: searchType,
+                              isOwner: '0',
+                              batchCtr: _favSearchCtr,
+                              callFn: () => searchType != 1
+                                  ? _favSearchCtr.confirmCancelFav(
+                                      favList[index].id!)
+                                  : {},
+                            );
+                          }
+                        },
+                      );
                     },
                   )
                 : const CustomScrollView(
