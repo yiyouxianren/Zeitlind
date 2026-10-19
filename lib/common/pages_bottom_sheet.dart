@@ -161,59 +161,68 @@ class EpisodeBottomSheet {
                     },
               child: Text(
                 '已选 ${_selected.length}/${episodes.length} · ${_selected.length == episodes.length ? '取消全选' : '全选'}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 style: Theme.of(context).textTheme.titleMedium,
               ),
             )
           : Text(
-              '合集（${episodes.length}）',
+              '${dataType == VideoEpidoesType.videoPart ? '分P' : '合集'}（${episodes.length}）',
               style: Theme.of(context).textTheme.titleMedium,
             ),
-      actions: !isFullScreen
+      // 批量下载入口不随 isFullScreen 隐藏：视频详情页的分P选集
+      // 正是以 isFullScreen: true 打开的（右侧抽屉），若沿用旧条件
+      // actions 会整体为 null，导致这类选集没有批量下载按钮。
+      actions: (enableBatchDownload && setState != null)
           ? [
-              if (enableBatchDownload && setState != null) ...[
-                if (batchMode) ...[
-                  // 下载操作固定在 AppBar（不受列表布局影响）
-                  FilledButton.tonalIcon(
-                    onPressed: (_selected.isEmpty || _downloading)
-                        ? null
-                        : () => _startBatchDownload(setState),
-                    icon: const Icon(Icons.download_outlined, size: 18),
-                    label: Text(_downloading ? '下载中' : '下载(${_selected.length})'),
+              if (batchMode) ...[
+                // 下载操作固定在 AppBar（不受列表布局影响）
+                FilledButton.tonalIcon(
+                  style: FilledButton.styleFrom(
+                    visualDensity: VisualDensity.compact,
+                    padding: const EdgeInsets.symmetric(horizontal: 10),
                   ),
-                  TextButton(
-                    onPressed: _downloading
-                        ? null
-                        : () {
-                            _selected.clear();
-                            setState(() => _batchMode = false);
-                          },
-                    child: const Text('取消'),
-                  ),
-                ]
-                else
-                  // 顶端批量下载入口：文字+图标，点击目标大且直观
-                  TextButton.icon(
-                    onPressed: () {
-                      _selected.clear();
-                      setState(() => _batchMode = true);
-                    },
-                    icon: const Icon(Icons.download_outlined, size: 20),
-                    label: const Text('批量下载'),
-                  ).wrapSemantics('批量下载入口'),
-                IconButton(
-                  icon: const Icon(Icons.close, size: 20),
-                  onPressed: () => Navigator.pop(context),
+                  onPressed: (_selected.isEmpty || _downloading)
+                      ? null
+                      : () => _startBatchDownload(setState),
+                  icon: const Icon(Icons.download_outlined, size: 18),
+                  label:
+                      Text(_downloading ? '下载中' : '下载(${_selected.length})'),
                 ),
-                const SizedBox(width: 14),
-              ] else ...[
-                IconButton(
-                  icon: const Icon(Icons.close, size: 20),
-                  onPressed: () => Navigator.pop(context),
+                TextButton(
+                  onPressed: _downloading
+                      ? null
+                      : () {
+                          _selected.clear();
+                          setState(() => _batchMode = false);
+                        },
+                  child: const Text('取消'),
                 ),
-                const SizedBox(width: 14),
-              ],
+              ] else
+                // 顶端批量下载入口：文字+图标，点击目标大且直观
+                TextButton.icon(
+                  onPressed: () {
+                    _selected.clear();
+                    setState(() => _batchMode = true);
+                  },
+                  icon: const Icon(Icons.download_outlined, size: 20),
+                  label: const Text('批量下载'),
+                ).wrapSemantics('批量下载入口'),
+              IconButton(
+                icon: const Icon(Icons.close, size: 20),
+                onPressed: () => Navigator.pop(context),
+              ),
+              const SizedBox(width: 14),
             ]
-          : null,
+          : !isFullScreen
+              ? [
+                  IconButton(
+                    icon: const Icon(Icons.close, size: 20),
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                  const SizedBox(width: 14),
+                ]
+              : null,
     );
   }
 
