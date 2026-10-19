@@ -1,14 +1,25 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
 import 'package:get/get.dart';
 import 'package:pilipala/common/widgets/network_img_layer.dart';
+import 'package:pilipala/models/video/play/quality.dart';
+import 'package:pilipala/models/video/play/url.dart';
 import 'package:pilipala/pages/common/timer_close.dart';
 import 'package:pilipala/plugin/pl_player/index.dart';
+import 'package:pilipala/plugin/pl_player/models/play_repeat.dart';
 import '../controller.dart';
 import 'audio_time_jump_dialog.dart';
 
-class AudioPlayerPanel extends StatelessWidget {
+class AudioPlayerPanel extends StatefulWidget {
   const AudioPlayerPanel({super.key, required this.controller});
   final VideoDetailController controller;
+
+  @override
+  State<AudioPlayerPanel> createState() => _AudioPlayerPanelState();
+}
+
+class _AudioPlayerPanelState extends State<AudioPlayerPanel> {
+  VideoDetailController get controller => widget.controller;
 
   String _time(Duration value) {
     final seconds = value.inSeconds;
@@ -135,25 +146,33 @@ class AudioPlayerPanel extends StatelessWidget {
                             style: const TextStyle(color: Colors.white)),
                       ]),
                     ),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                    Wrap(
+                      alignment: WrapAlignment.center,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      spacing: 2,
                       children: [
-                        TextButton.icon(
-                          style: TextButton.styleFrom(
-                            foregroundColor: Colors.white,
-                            disabledForegroundColor: Colors.white38,
-                          ),
+                        _panelButton(
+                          icon: Icons.more_time_rounded,
+                          label: '时间跳转',
                           onPressed: duration > Duration.zero &&
                                   !controller.audioSwitching.value
                               ? () => _jumpToTime(context, player)
                               : null,
-                          icon: const Icon(Icons.more_time_rounded),
-                          label: const Text('时间跳转'),
                         ),
-                        TextButton(
+                        _panelButton(
+                          icon: Icons.album_outlined,
+                          label: controller.currentAudioQa?.description ?? '音质',
+                          onPressed: () => _audioQualitySheet(context, player),
+                        ),
+                        _panelButton(
+                          icon: Icons.repeat,
+                          label: player.playRepeat.description,
+                          onPressed: () => _repeatSheet(context, player),
+                        ),
+                        _panelButton(
+                          icon: null,
+                          label: '${player.playbackSpeed}x',
                           onPressed: () => _speedSheet(context, player),
-                          child: Text('${player.playbackSpeed}x',
-                              style: const TextStyle(color: Colors.white)),
                         ),
                       ],
                     ),
@@ -165,6 +184,28 @@ class AudioPlayerPanel extends StatelessWidget {
         );
       }),
     );
+  }
+
+  /// 音频面板底部功能按钮（统一白字样式）
+  Widget _panelButton({
+    IconData? icon,
+    required String label,
+    VoidCallback? onPressed,
+  }) {
+    const style = TextStyle(color: Colors.white, fontSize: 12);
+    final child = Text(label, style: style);
+    return icon == null
+        ? TextButton(onPressed: onPressed, child: child)
+        : TextButton.icon(
+            style: TextButton.styleFrom(
+              foregroundColor: Colors.white,
+              disabledForegroundColor: Colors.white38,
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+            ),
+            onPressed: onPressed,
+            icon: Icon(icon, size: 16, color: Colors.white),
+            label: child,
+          );
   }
 
   Future<void> _jumpToTime(
@@ -185,6 +226,168 @@ class AudioPlayerPanel extends StatelessWidget {
     }
   }
 
+  /// 选择音质（音频模式）
+  void _audioQualitySheet(BuildContext context, PlPlayerController player) {
+    final List<Map<String, dynamic>> options = _audioOptions();
+    if (options.isEmpty) {
+      SmartDialog.showToast('当前视频没有可切换的音质');
+      return;
+    }
+    showModalBottomSheet<void>(
+      context: context,
+      elevation: 0,
+      backgroundColor: Colors.transparent,
+      builder: (BuildContext ctx) {
+        return Container(
+          width: double.infinity,
+          height: 250,
+          clipBehavior: Clip.hardEdge,
+          decoration: BoxDecoration(
+            color: Theme.of(ctx).colorScheme.surface,
+            borderRadius: const BorderRadius.all(Radius.circular(12)),
+          ),
+          margin: const EdgeInsets.all(12),
+          child: Column(
+            children: [
+              const SizedBox(
+                height: 45,
+                child: Center(child: Text('选择音质')),
+              ),
+              Expanded(
+                child: Material(
+                  child: ListView(
+                    children: [
+                      for (final option in options)
+                        ListTile(
+                          onTap: () {
+                            if (controller.currentAudioQa?.code ==
+                                option['id']) {
+                              Get.back();
+                              return;
+                            }
+                            controller.currentAudioQa =
+                                AudioQualityCode.fromCode(option['id'] as int);
+                            controller.updatePlayer();
+                            Get.back();
+                            setState(() {});
+                          },
+                          dense: true,
+                          contentPadding:
+                              const EdgeInsets.only(left: 20, right: 20),
+                          title: Text(option['label'].toString()),
+                          subtitle: Text(
+                            option['codec'].toString(),
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Theme.of(ctx).colorScheme.outline,
+                            ),
+                          ),
+                          trailing: controller.currentAudioQa?.code ==
+                                  option['id']
+                              ? Icon(
+                                  Icons.done,
+                                  color: Theme.of(ctx).colorScheme.primary,
+                                )
+                              : const SizedBox(),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  /// 当前视频可选的音质列表（含杜比 / 无损）
+  List<Map<String, dynamic>> _audioOptions() {
+    final List<Map<String, dynamic>> options = [];
+    final Set<int> seen = <int>{};
+    void add(AudioItem? item) {
+      final int? id = item?.id;
+      if (id == null || !seen.add(id)) return;
+      options.add({
+        'id': id,
+        'label': AudioQualityCode.fromCode(id)?.description ??
+            item?.quality?.toString() ??
+            '$id',
+        'codec': item?.codecs?.toString() ?? '',
+      });
+    }
+
+    try {
+      final dash = controller.data.dash;
+      if (dash == null) return options;
+      add(dash.flac?.audio);
+      for (final item in dash.dolby?.audio ?? const <AudioItem>[]) {
+        add(item);
+      }
+      for (final item in dash.audio ?? const <AudioItem>[]) {
+        add(item);
+      }
+    } catch (_) {
+      // 数据未就绪（例如刚切集），返回已有选项
+    }
+    return options;
+  }
+
+  /// 选择播放顺序（音频模式）
+  void _repeatSheet(BuildContext context, PlPlayerController player) {
+    showModalBottomSheet<void>(
+      context: context,
+      elevation: 0,
+      backgroundColor: Colors.transparent,
+      builder: (BuildContext ctx) {
+        return Container(
+          width: double.infinity,
+          height: 250,
+          clipBehavior: Clip.hardEdge,
+          decoration: BoxDecoration(
+            color: Theme.of(ctx).colorScheme.surface,
+            borderRadius: const BorderRadius.all(Radius.circular(12)),
+          ),
+          margin: const EdgeInsets.all(12),
+          child: Column(
+            children: [
+              const SizedBox(
+                height: 45,
+                child: Center(child: Text('选择播放顺序')),
+              ),
+              Expanded(
+                child: Material(
+                  child: ListView(
+                    children: [
+                      for (final PlayRepeat i in PlayRepeat.values)
+                        ListTile(
+                          onTap: () {
+                            player.setPlayRepeat(i);
+                            Get.back();
+                            setState(() {});
+                          },
+                          dense: true,
+                          contentPadding:
+                              const EdgeInsets.only(left: 20, right: 20),
+                          title: Text(i.description),
+                          trailing: player.playRepeat == i
+                              ? Icon(
+                                  Icons.done,
+                                  color: Theme.of(ctx).colorScheme.primary,
+                                )
+                              : const SizedBox(),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   void _speedSheet(BuildContext context, PlPlayerController player) {
     showModalBottomSheet<void>(
         context: context,
@@ -195,6 +398,7 @@ class AudioPlayerPanel extends StatelessWidget {
                     onTap: () {
                       player.setPlaybackSpeed(speed);
                       Get.back();
+                      setState(() {});
                     }),
             ]));
   }
