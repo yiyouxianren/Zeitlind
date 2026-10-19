@@ -117,6 +117,10 @@ class _PagesPanelState extends State<PagesPanel> {
                       sheetHeight: widget.sheetHeight,
                       dataType: VideoEpidoesType.videoPart,
                       context: context,
+                      // 分P（如 BV1pxhB6ZE7h 多P歌曲合集）也支持批量下载，
+                      // Part 自身没有 aid/bvid，需传父视频 bvid 供入队使用
+                      enableBatchDownload: true,
+                      bvid: widget.videoIntroCtr.bvid,
                     ).show(context);
                   },
                   child: Text(

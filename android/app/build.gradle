@@ -67,6 +67,11 @@ android {
     }
 
     buildTypes {
+        debug {
+            // debug 包也用 release 密钥签名：与已安装的正式版同签名，
+            // 才能直接 -r 覆盖安装而不卸载丢数据
+            signingConfig signingConfigs.release
+        }
         release {
             signingConfig signingConfigs.release
             // 包体压缩：R8 代码压缩/优化 + 资源压缩
