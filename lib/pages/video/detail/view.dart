@@ -229,6 +229,11 @@ class _VideoDetailPageState extends State<VideoDetailPage>
     videoIntroController = Get.put(
         VideoIntroController(bvid: Get.parameters['bvid']!),
         tag: heroTag);
+    // 音频模式不渲染“简介”tab，简介数据不会自动加载；
+    // 分P/合集自动连播依赖它，这里主动补齐。
+    if (vdCtr.audioMode) {
+      videoIntroController.queryVideoIntro();
+    }
     videoIntroController.videoDetail.listen((value) {
       videoPlayerServiceHandler.onVideoDetailChange(value, vdCtr.cid.value);
     });
@@ -286,6 +291,9 @@ class _VideoDetailPageState extends State<VideoDetailPage>
     playerStatus.value = status;
     autoEnterPip(status: status);
     if (status == PlayerStatus.completed) {
+      debugPrint('[autoplay] completed: videoType=${vdCtr.videoType} '
+          'repeat=${plPlayerController!.playRepeat} '
+          'audioMode=${vdCtr.audioMode}');
       // 结束播放退出全屏
       if (autoExitFullcreen) {
         plPlayerController!.triggerFullScreen(status: false);

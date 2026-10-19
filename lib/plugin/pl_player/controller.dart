@@ -411,6 +411,7 @@ class PlPlayerController {
     buffered.value = Duration.zero;
     _heartDuration = 0;
     _position.value = Duration.zero;
+    _completionDispatched = false;
     // 初始化时清空弹幕，防止上次重叠
     if (danmakuController != null) {
       danmakuController!.clear();
@@ -564,6 +565,32 @@ class PlPlayerController {
   final List<Function(Duration position)> _positionListeners = [];
   final List<Function(PlayerStatus status)> _statusListeners = [];
 
+  /// 播放完成是否已派发（防止 completed 流与位置兜底重复触发自动连播）
+  bool _completionDispatched = false;
+
+  /// 派发一次播放完成事件（供 completed 流与位置兜底共用）
+  void _dispatchCompleted() {
+    if (_completionDispatched) return;
+    _completionDispatched = true;
+    playerStatus.status.value = PlayerStatus.completed;
+    for (var element in _statusListeners) {
+      element(PlayerStatus.completed);
+    }
+  }
+
+  /// 位置兜底：部分流/解码组合下 media_kit 的 completed 流不触发
+  /// （eof-reached 受 isPlayingStateChangeAllowed 约束），
+  /// 播放位置到达总时长附近时主动判定播放完成，保证分P/合集自动连播。
+  void _maybeDispatchCompletion(Duration position) {
+    if (_completionDispatched) return;
+    final Duration total = _duration.value;
+    if (total <= Duration.zero) return;
+    if (position < total - const Duration(milliseconds: 800)) return;
+    if (playerStatus.status.value != PlayerStatus.playing) return;
+    debugPrint('[player] completion fallback at $position / $total');
+    _dispatchCompleted();
+  }
+
   /// 播放事件监听
   void startListeners() {
     subscriptions.addAll(
@@ -586,15 +613,12 @@ class PlPlayerController {
           }
         }),
         _videoPlayerController!.stream.completed.listen((event) {
+          debugPrint('[player] completed stream event=$event');
           if (event) {
-            playerStatus.status.value = PlayerStatus.completed;
-
-            /// 触发回调事件
-            for (var element in _statusListeners) {
-              element(PlayerStatus.completed);
-            }
+            _dispatchCompleted();
           } else {
-            // playerStatus.status.value = PlayerStatus.playing;
+            // 重新打开/跳转后允许下一次完成事件
+            _completionDispatched = false;
           }
           makeHeartBeat(positionSeconds.value, type: 'status');
         }),
@@ -605,6 +629,7 @@ class PlPlayerController {
             _sliderPosition.value = event;
             updateSliderPositionSecond();
           }
+          _maybeDispatchCompletion(event);
           querySubtitleContent(
               videoPlayerController!.state.position.inSeconds.toDouble());
 
@@ -729,6 +754,7 @@ class PlPlayerController {
     }
     await _videoPlayerController?.play();
     playerStatus.status.value = PlayerStatus.playing;
+    _completionDispatched = false;
     await getCurrentVolume();
     await getCurrentBrightness();
 

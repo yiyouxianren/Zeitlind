@@ -421,12 +421,19 @@ class VideoIntroController extends GetxController {
     final VideoDetailController videoDetailCtr =
         Get.find<VideoDetailController>(tag: heroTag);
     if (enableRelatedVideo) {
-      final ReleatedController releatedCtr =
-          Get.find<ReleatedController>(tag: heroTag);
-      releatedCtr.bvid = bvid;
-      releatedCtr.queryRelatedVideo();
+      // 相关推荐控制器只在“简介”tab 渲染后才存在；音频模式/未渲染该 tab 时
+      // Get.find 会抛异常并中断自动连播，这里必须容错。
+      try {
+        final ReleatedController releatedCtr =
+            Get.find<ReleatedController>(tag: heroTag);
+        releatedCtr.bvid = bvid;
+        releatedCtr.queryRelatedVideo();
+      } catch (_) {}
     }
 
+    // 切换分P/分集属于连续播放，必须保持自动播放
+    videoDetailCtr.autoPlay.value = true;
+    videoDetailCtr.isShowCover.value = false;
     videoDetailCtr
       ..bvid = bvid
       ..oid.value = aid ?? IdUtils.bv2av(bvid)
@@ -480,58 +487,82 @@ class VideoIntroController extends GetxController {
   }
 
   /// 列表循环或者顺序播放时，自动播放下一个
-  void nextPlay() {
-    final List episodes = [];
-    bool isPages = false;
-    late String cover;
-    final VideoDetailController videoDetailCtr =
-        Get.find<VideoDetailController>(tag: heroTag);
+  Future<void> nextPlay() async {
+    try {
+      final VideoDetailController videoDetailCtr =
+          Get.find<VideoDetailController>(tag: heroTag);
 
-    /// 优先稍后再看、收藏夹
-    if (videoDetailCtr.isWatchLaterVisible.value) {
-      episodes.addAll(videoDetailCtr.mediaList);
-    } else if (videoDetail.value.ugcSeason != null) {
-      final UgcSeason ugcSeason = videoDetail.value.ugcSeason!;
-      final List<SectionItem> sections = ugcSeason.sections!;
-      for (int i = 0; i < sections.length; i++) {
-        final List<EpisodeItem> episodesList = sections[i].episodes!;
-        episodes.addAll(episodesList);
+      // 音频模式不会渲染“简介”tab，简介数据可能从未加载；
+      // 自动连播前先补齐，否则拿不到分P/合集列表。
+      if ((videoDetail.value.pages == null ||
+              videoDetail.value.pages!.isEmpty) &&
+          videoDetail.value.ugcSeason == null &&
+          !videoDetailCtr.isWatchLaterVisible.value) {
+        await queryVideoIntro();
+        if (isClosed) return;
       }
-    } else if (videoDetail.value.pages != null) {
-      isPages = true;
-      final List<Part> pages = videoDetail.value.pages!;
-      episodes.addAll(pages);
-    }
 
-    if (episodes.isEmpty) {
-      return;
-    }
-    final int currentIndex =
-        episodes.indexWhere((e) => e.cid == lastPlayCid.value);
-    final PlayRepeat platRepeat = videoDetailCtr.plPlayerController.playRepeat;
-    int nextIndex = currentIndex < 0 ? 0 : currentIndex + 1;
-    int checked = 0;
+      final List episodes = [];
+      bool isPages = false;
+      late String cover;
 
-    while (checked < episodes.length) {
-      if (nextIndex >= episodes.length) {
-        if (platRepeat == PlayRepeat.listCycle) {
-          nextIndex = 0;
-        } else {
-          return;
+      /// 优先稍后再看、收藏夹
+      if (videoDetailCtr.isWatchLaterVisible.value) {
+        episodes.addAll(videoDetailCtr.mediaList);
+      } else if (videoDetail.value.ugcSeason != null) {
+        final UgcSeason ugcSeason = videoDetail.value.ugcSeason!;
+        final List<SectionItem> sections = ugcSeason.sections!;
+        for (int i = 0; i < sections.length; i++) {
+          final List<EpisodeItem> episodesList = sections[i].episodes!;
+          episodes.addAll(episodesList);
         }
+      } else if (videoDetail.value.pages != null) {
+        isPages = true;
+        final List<Part> pages = videoDetail.value.pages!;
+        episodes.addAll(pages);
       }
-      final episode = episodes[nextIndex];
-      final int? cid = episode.cid;
-      if (cid != null && cid != -1) {
-        cover = episode.cover;
-        final String rBvid = isPages ? bvid : episode.bvid;
-        final int rAid = isPages ? IdUtils.bv2av(bvid) : episode.aid!;
-        changeSeasonOrbangu(rBvid, cid, rAid, cover);
+
+      if (episodes.isEmpty) {
+        debugPrint('[autoplay] nextPlay: episodes empty '
+            '(ugcSeason=${videoDetail.value.ugcSeason != null}, '
+            'pages=${videoDetail.value.pages?.length})');
         return;
       }
-      SmartDialog.showToast('当前视频暂不支持播放，自动跳过');
-      nextIndex++;
-      checked++;
+      final int currentIndex =
+          episodes.indexWhere((e) => e.cid == lastPlayCid.value);
+      final PlayRepeat platRepeat =
+          videoDetailCtr.plPlayerController.playRepeat;
+      int nextIndex = currentIndex < 0 ? 0 : currentIndex + 1;
+      int checked = 0;
+      debugPrint('[autoplay] nextPlay: episodes=${episodes.length} '
+          'currentIndex=$currentIndex repeat=$platRepeat '
+          'cid=${lastPlayCid.value}');
+
+      while (checked <= episodes.length) {
+        if (nextIndex >= episodes.length) {
+          if (platRepeat == PlayRepeat.listCycle) {
+            nextIndex = 0;
+          } else {
+            return;
+          }
+        }
+        final episode = episodes[nextIndex];
+        final int? cid = episode.cid;
+        if (cid != null && cid != -1) {
+          cover = episode.cover;
+          final String rBvid = isPages ? bvid : episode.bvid;
+          final int rAid = isPages ? IdUtils.bv2av(bvid) : episode.aid!;
+          await changeSeasonOrbangu(rBvid, cid, rAid, cover);
+          return;
+        }
+        SmartDialog.showToast('当前视频暂不支持播放，自动跳过');
+        nextIndex++;
+        checked++;
+      }
+    } catch (err, stack) {
+      // 自动连播失败不应静默：记录原因并提示一次
+      debugPrint('[autoplay] nextPlay error: $err\n$stack');
+      SmartDialog.showToast('自动播放下一集失败');
     }
   }
 
