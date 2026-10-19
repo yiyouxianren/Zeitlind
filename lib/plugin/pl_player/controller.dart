@@ -293,7 +293,16 @@ class PlPlayerController {
     fontSizeVal = cache.fontSizeVal;
     danmakuDurationVal = cache.danmakuDurationVal;
     strokeWidth = cache.strokeWidth;
-    playRepeat = cache.playRepeat;
+    // 播放顺序以持久化值为准（缓存可能落后于用户最近一次设置）
+    final dynamic storedRepeat = videoStorage.get(VideoBoxKey.playRepeat);
+    if (storedRepeat is num) {
+      final int idx =
+          PlayRepeat.values.indexWhere((e) => e.value == storedRepeat);
+      playRepeat = idx >= 0 ? PlayRepeat.values[idx] : cache.playRepeat;
+      cache.playRepeat = playRepeat;
+    } else {
+      playRepeat = cache.playRepeat;
+    }
     _playbackSpeed.value = cache.playbackSpeed;
     enableAutoLongPressSpeed = cache.enableAutoLongPressSpeed;
     _longPressSpeed.value = cache.longPressSpeed;
@@ -1107,7 +1116,12 @@ class PlPlayerController {
 
   setPlayRepeat(PlayRepeat type) {
     playRepeat = type;
+    // 双写：Hive 持久化 + 进程内缓存同步。
+    // 详情页退出时 Player 单例会被销毁，下一个视频重新构造实例时
+    // 从 GlobalDataCache 读取播放顺序；只写 Hive 不更新缓存会导致
+    // 新实例读到启动时的旧值（表现为每打开一个视频都要重设播放顺序）。
     videoStorage.put(VideoBoxKey.playRepeat, type.value);
+    GlobalDataCache().playRepeat = type;
   }
 
   /// 缓存本次弹幕选项
