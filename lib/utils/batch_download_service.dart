@@ -35,12 +35,18 @@ class BatchDownloadService extends GetxService with WidgetsBindingObserver {
   final RxInt failCount = 0.obs;
 
   int _initialTotal = 0;
+  /// 本轮是否为音频批量下载（队列首项 mode 决定）
+  bool _audioMode = false;
   Isolate? _worker;
   ReceivePort? _receivePort;
   SendPort? _toWorker;
   DateTime? _pausedAt;
 
   static const String _tag = 'batchDownload';
+
+  /// 队列去重键：音频/视频同一 cid 可分别入队，故按 mode+cid 组合去重
+  static String _itemKey(Map<String, dynamic> item) =>
+      '${item['mode'] ?? 'video'}:${item['cid']}';
 
   /// 加入队列并启动（若未运行）
   void enqueue(List<Map<String, dynamic>> items) {
@@ -50,18 +56,18 @@ class BatchDownloadService extends GetxService with WidgetsBindingObserver {
       // Hive 单例），导致序号错乱与连环失败。改为排队：本轮结束后由
       // _finish 自动接续下一批（预解析在主 isolate 重新走 _start 流程）。
       DownloadLogger.log('[service] enqueue while running -> queued for next round');
-      final existing = queue.map((e) => e['cid']).toSet();
+      final existing = queue.map(_itemKey).toSet();
       for (final it in items) {
-        if (!existing.contains(it['cid'])) queue.add(it);
+        if (!existing.contains(_itemKey(it))) queue.add(it);
       }
       _initialTotal += items.length;
       SmartDialog.showToast(
           '已加入队列：当前批次完成后自动开始（共 ${queue.length} 个待下载）');
       return;
     }
-    final existing = queue.map((e) => e['cid']).toSet();
+    final existing = queue.map(_itemKey).toSet();
     for (final it in items) {
-      if (!existing.contains(it['cid'])) queue.add(it);
+      if (!existing.contains(_itemKey(it))) queue.add(it);
     }
     DownloadLogger.log('[service] queue now=${queue.length} '
         'running=${running.value} toWorker=${_toWorker != null}');
@@ -120,8 +126,10 @@ class BatchDownloadService extends GetxService with WidgetsBindingObserver {
     okCount.value = 0;
     failCount.value = 0;
     _initialTotal = queue.length;
-    SmartDialog.showToast(
-        _initialTotal > 1 ? '开始批量下载：$_initialTotal 个视频' : '开始下载');
+    _audioMode = queue.isNotEmpty && queue.first['mode'] == 'audio';
+    SmartDialog.showToast(_initialTotal > 1
+        ? '开始批量下载：$_initialTotal 个${_audioMode ? '音频' : '视频'}'
+        : '开始下载');
     // 前台服务 + WakeLock：后台/锁屏时保持下载
     DownloadLogger.log('[service] keepAlive starting');
     DownloadNotification.startKeepAlive();
@@ -146,13 +154,24 @@ class BatchDownloadService extends GetxService with WidgetsBindingObserver {
     final List<Map<String, dynamic>> resolvedItems = [];
     final List<Map<String, dynamic>> failedItems = [];
     for (final item in queue) {
-      final MediaDownloadPlan? plan = await MediaDownloadService.resolvePlan(
-        bvid: item['bvid'],
-        cid: item['cid'],
-        preferredVideoQa: item['videoQa'],
-        preferredDecode: item['decode'],
-        toast: _initialTotal == 1 ? (m) => SmartDialog.showToast(m) : null,
-      );
+      final bool audioMode = item['mode'] == 'audio';
+      final MediaDownloadPlan? plan = audioMode
+          ? await MediaDownloadService.resolveAudioPlan(
+              bvid: item['bvid'],
+              cid: item['cid'],
+              toast: _initialTotal == 1
+                  ? (m) => SmartDialog.showToast(m)
+                  : null,
+            )
+          : await MediaDownloadService.resolvePlan(
+              bvid: item['bvid'],
+              cid: item['cid'],
+              preferredVideoQa: item['videoQa'],
+              preferredDecode: item['decode'],
+              toast: _initialTotal == 1
+                  ? (m) => SmartDialog.showToast(m)
+                  : null,
+            );
       if (plan != null) {
         resolvedItems.add({...item, 'plan': plan});
       } else {
@@ -161,25 +180,31 @@ class BatchDownloadService extends GetxService with WidgetsBindingObserver {
     }
     DownloadLogger.log('[service] resolve done: ok=${resolvedItems.length} '
         'fail=${failedItems.length}');
-    // 同名跳过：该标题的视频文件已存在于 Download/Zeitlind/Video（含
-    // 用户手动导入的旧缓存）时不再重复下载视频轨道，但弹幕/分段附属
-    // 文件仍按需刷新（旧附属缺失/损坏/旧版本下载的都补齐）。
-    final List<Map<String, dynamic>> skipped =
-        resolvedItems.where((it) => MediaDownloadService
-                .isVideoDownloaded((it['title'] ?? '') as String))
-            .toList();
+    // 同名跳过：目标文件已存在时不重复下载。
+    // 音频检查 music/*.mp3，视频检查 Video/*.mp4（并刷新附属文件）。
+    final List<Map<String, dynamic>> skipped = resolvedItems
+        .where((it) => it['mode'] == 'audio'
+            ? MediaDownloadService.isAudioDownloaded(
+                (it['title'] ?? '') as String)
+            : MediaDownloadService.isVideoDownloaded(
+                (it['title'] ?? '') as String))
+        .toList();
     if (skipped.isNotEmpty) {
       resolvedItems.removeWhere((it) => skipped.contains(it));
       queue.removeWhere((e) => skipped.any((s) => s['cid'] == e['cid']));
       for (final it in skipped) {
-        DownloadLogger.log('[service] SKIP video, refresh attachments: '
+        DownloadLogger.log('[service] SKIP ${it['mode'] == 'audio' ? 'audio' : 'video'}, '
             'cid=${it['cid']} title=${it['title']}');
       }
-      // 附属刷新走主 isolate（网络请求经 Request 单例），
+      // 附属刷新只针对视频（音频无弹幕/分段文件），走主 isolate，
       // 不进 worker，也不占进度弹窗。
-      unawaited(_refreshAttachmentsFor(skipped));
+      final List<Map<String, dynamic>> skippedVideos =
+          skipped.where((it) => it['mode'] != 'audio').toList();
+      if (skippedVideos.isNotEmpty) {
+        unawaited(_refreshAttachmentsFor(skippedVideos));
+      }
       SmartDialog.showToast(
-          '${skipped.length} 个视频已缓存过，跳过下载并刷新弹幕/分段');
+          '${skipped.length} 个${_audioMode ? '音频' : '视频'}已缓存过，跳过下载');
     }
     if (failedItems.isNotEmpty) {
       failCount.value += failedItems.length;
@@ -349,7 +374,7 @@ class BatchDownloadService extends GetxService with WidgetsBindingObserver {
         return Obx(() => AlertDialog(
               title: Text(_initialTotal > 1
                   ? '批量下载中（${okCount.value + failCount.value}/$_initialTotal）'
-                  : '视频下载'),
+                  : (_audioMode ? '音频下载' : '视频下载')),
               content: Text(
                   currentMsg.value.isEmpty ? '准备中...' : currentMsg.value),
               actions: [
@@ -386,7 +411,7 @@ class BatchDownloadService extends GetxService with WidgetsBindingObserver {
         DownloadNotification.showProgress(
           title: _initialTotal > 1
               ? '批量下载 (${done + 1}/$_initialTotal)'
-              : '视频下载',
+              : (_audioMode ? '音频下载' : '视频下载'),
           text: '${msg['title']} · ${msg['msg']}',
           progress: percent,
         );
@@ -398,6 +423,10 @@ class BatchDownloadService extends GetxService with WidgetsBindingObserver {
       case 'merge':
         // worker 已把轨道下齐，主 isolate 执行 FFmpeg 合并（插件限制：
         // 原生完成回调只能回主 isolate，worker 里跑会闪退）
+        unawaited(_mergeOnMain(msg));
+        break;
+      case 'audioMerge':
+        // 音频：轨道已下载，主 isolate 转写 mp3（与视频合并共用串行队列）
         unawaited(_mergeOnMain(msg));
         break;
       case 'done':
@@ -463,40 +492,52 @@ class BatchDownloadService extends GetxService with WidgetsBindingObserver {
   Future<void> _doMerge(Map<dynamic, dynamic> msg) async {
     final int cid = msg['cid'] as int;
     final MediaDownloadPlan plan = msg['plan'] as MediaDownloadPlan;
+    final bool audioOnly = plan.audioOnly;
     _pendingMerges.add(cid);
     // 登记合并保护：worker 下载后续视频时的临时清理不得删本 cid 的轨道
     MediaDownloadService.mergingCids.add(cid);
-    currentMsg.value = '合并 MP4 中';
+    currentMsg.value = audioOnly ? '转写 MP3 中' : '合并 MP4 中';
+    final String title = msg['title'] as String? ?? '';
     // 通知走 fire-and-forget：MethodChannel invoke 返回的 future 若被
     // await，通道异常/ROM 冻结会挂起整条 _doMerge 链
     unawaited(DownloadNotification.showProgress(
-      title: _initialTotal > 1 ? '批量下载' : '视频下载',
-      text: '${msg['title']} · 合并 MP4 中',
+      title: _initialTotal > 1 ? '批量下载' : '音频下载',
+      text: '$title · ${audioOnly ? '转写 MP3 中' : '合并 MP4 中'}',
       progress: null,
     ));
     // 保底看门狗：FFmpegKit 的 MethodChannel 回调若丢失（华为 ROM 低内存
-    // 回收插件会话等），await mergeTracks 会永远挂起，弹窗卡死在
-    // 「合并 MP4 中」。看门狗周期性检查输出文件是否已实际生成：
-    // - 生成 → 文件级证据表明合并已完成，直接按成功收尾（解除死锁）
+    // 回收插件会话等），await 会永远挂起，弹窗卡死。
+    // - 输出文件已生成 → 按成功收尾（解除死锁）
     // - 连续 20 次未生成 → 放弃本任务，按失败收尾，继续下一个
-    final String title = msg['title'] as String? ?? '';
-    final String outputPath = MediaDownloadService.videoOutputPath(title);
+    final String outputPath = audioOnly
+        ? MediaDownloadService.audioOutputPath(title)
+        : MediaDownloadService.videoOutputPath(title);
     final DateTime mergeStartedAt = DateTime.now();
     Timer watchdog = _startMergeWatchdog(
         cid, title, outputPath, mergeStartedAt);
-    final bool ok = await MediaDownloadService.mergeTracks(
-      cid: cid,
-      bvid: msg['bvid'] as String,
-      title: title,
-      plan: plan,
-      hasAudio: plan.audioUrl != null,
-      tmpVideo: '',
-      tmpAudio: '',
-      silent: true,
-      onProgress: (m) {
-        currentMsg.value = m;
-      },
-    );
+    final bool ok = audioOnly
+        ? await MediaDownloadService.transcodeAudio(
+            cid: cid,
+            title: title,
+            plan: plan,
+            silent: true,
+            onProgress: (m) {
+              currentMsg.value = m;
+            },
+          )
+        : await MediaDownloadService.mergeTracks(
+            cid: cid,
+            bvid: msg['bvid'] as String,
+            title: title,
+            plan: plan,
+            hasAudio: plan.audioUrl != null,
+            tmpVideo: '',
+            tmpAudio: '',
+            silent: true,
+            onProgress: (m) {
+              currentMsg.value = m;
+            },
+          );
     _stopMergeWatchdog(watchdog, cid, 'normal-done ok=$ok');
     // 看门狗可能已抢先结算本 cid（回调丢失场景）：跳过重复计数
     if (_watchdogResolved.remove(cid)) {
@@ -639,14 +680,18 @@ class BatchDownloadService extends GetxService with WidgetsBindingObserver {
       SmartDialog.dismiss(status: SmartStatus.smart);
       SmartDialog.showToast(single
           ? (canceled ? '下载已取消' : (ok > 0 ? '下载完成' : '下载失败'))
-          : (canceled ? '批量下载已取消：完成 $ok，失败 $fail' : '批量下载完成：成功 $ok，失败 $fail'));
+          : (canceled
+              ? '批量${_audioMode ? '音频' : '视频'}下载已取消：完成 $ok，失败 $fail'
+              : '批量${_audioMode ? '音频' : '视频'}下载完成：成功 $ok，失败 $fail'));
     }, (e, st) {
       DownloadLogger.log('[service] finish UI error: $e');
     });
     unawaited(DownloadNotification.done(
       title: single
           ? (canceled ? '下载已取消' : '下载完成')
-          : (canceled ? '批量下载已取消' : '批量下载完成'),
+          : (canceled
+              ? '批量${_audioMode ? '音频' : '视频'}下载已取消'
+              : '批量${_audioMode ? '音频' : '视频'}下载完成'),
       text: '成功 $ok，失败 $fail',
     ).catchError((e) {
       DownloadLogger.log('[service] finish notif error: $e');
@@ -890,21 +935,32 @@ Future<void> _workerMain(_WorkerConfig config) async {
       continue;
     }
     bool tracksDone = false;
+    final bool audioItem = item['mode'] == 'audio';
     try {
-      // worker 只做纯 Dio 下载（returnAfterTracks：不碰 FFmpegKit——
-      // 其原生完成回调会发给本 isolate 的 MethodChannel response，
-      // isolate 退出后触发 engine did_send 断言 → 整个 APP 闪退）
-      tracksDone = await MediaDownloadService.downloadVideo(
-        bvid: item['bvid'],
-        cid: item['cid'],
-        title: title,
-        preferredVideoQa: item['videoQa'],
-        preferredDecode: item['decode'],
-        silent: true,
-        resolved: plan,
-        returnAfterTracks: true,
-        onProgress: _throttledProgress(toMain, title),
-      );
+      if (audioItem) {
+        // 音频：worker 只下载音轨（纯 Dio），转写 mp3 交回主 isolate
+        tracksDone = await MediaDownloadService.downloadAudioTrack(
+          cid: item['cid'],
+          plan: plan,
+          silent: true,
+          onProgress: _throttledProgress(toMain, title),
+        );
+      } else {
+        // worker 只做纯 Dio 下载（returnAfterTracks：不碰 FFmpegKit——
+        // 其原生完成回调会发给本 isolate 的 MethodChannel response，
+        // isolate 退出后触发 engine did_send 断言 → 整个 APP 闪退）
+        tracksDone = await MediaDownloadService.downloadVideo(
+          bvid: item['bvid'],
+          cid: item['cid'],
+          title: title,
+          preferredVideoQa: item['videoQa'],
+          preferredDecode: item['decode'],
+          silent: true,
+          resolved: plan,
+          returnAfterTracks: true,
+          onProgress: _throttledProgress(toMain, title),
+        );
+      }
     } catch (e, st) {
       // 理论上 downloadVideo 内部已兜底，这里防止 isolate 因意外异常崩溃
       DownloadLogger.log('[worker] ITEM CRASH cid=${item['cid']}: $e',
@@ -913,18 +969,19 @@ Future<void> _workerMain(_WorkerConfig config) async {
           isolateTag: 'dl-isolate');
     }
     if (tracksDone) {
-      // 轨道齐了：交回主 isolate 执行 FFmpeg 合并
-      DownloadLogger.log('[worker] tracks ready cid=${item['cid']}, merge on main isolate',
+      // 轨道齐了：交回主 isolate 执行 FFmpeg（合并/转写）
+      DownloadLogger.log('[worker] tracks ready cid=${item['cid']} '
+          'audio=$audioItem, ffmpeg on main isolate',
           isolateTag: 'dl-isolate');
       toMain.send({
-        'type': 'merge',
+        'type': audioItem ? 'audioMerge' : 'merge',
         'cid': item['cid'],
         'title': title,
         'bvid': item['bvid'],
         'plan': plan,
       });
       queue.removeWhere((e) => e['cid'] == item['cid']);
-      continue; // 不计入 ok/fail，等主 isolate mergeDone 消息
+      continue; // 不计入 ok/fail，等主 isolate 处理完成消息
     }
     fail++;
     DownloadLogger.log('[worker] item done ok=false remaining=${queue.length}',

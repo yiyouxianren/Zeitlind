@@ -641,6 +641,9 @@ class VideoIntroController extends GetxController {
         context: Get.context!,
         sheetHeight: Get.size.height,
         isFullScreen: true,
+        // 分P 与合集都支持批量下载（视频/音频）
+        enableBatchDownload: true,
+        bvid: bvid,
         changeFucCall: (item, index) {
           if (dataType == VideoEpidoesType.videoEpisode) {
             changeSeasonOrbangu(

@@ -20,6 +20,9 @@ class EpisodeBottomSheet {
   /// 合集面板启用批量下载：条目出现勾选框，标题栏出现批量下载入口
   final bool enableBatchDownload;
 
+  /// 分P 场景的父视频 bvid（Part 自身没有 aid/bvid，批量下载需要）
+  final String? bvid;
+
   /// 多选模式状态（仅在 enableBatchDownload 时使用）
   final Set<int> _selected = <int>{};
   bool _batchMode = false;
@@ -35,6 +38,7 @@ class EpisodeBottomSheet {
     this.sheetHeight,
     this.isFullScreen = false,
     this.enableBatchDownload = false,
+    this.bvid,
   });
 
   Widget buildEpisodeListItem(
@@ -218,21 +222,84 @@ class EpisodeBottomSheet {
   void _startBatchDownload(StateSetter setState) {
     DownloadLogger.log('[batch] sheet confirm, selected=${_selected.length}');
     if (_downloading || _selected.isEmpty) return;
+    // 先让用户选择下载类型（视频 / 音频），再入队
+    _showDownloadTypeSheet(setState);
+  }
+
+  /// 勾选确认后的下载类型选择：批量下载视频 / 批量下载音频
+  void _showDownloadTypeSheet(StateSetter setState) {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (BuildContext ctx) {
+        return Container(
+          width: double.infinity,
+          decoration: BoxDecoration(
+            color: Theme.of(ctx).colorScheme.surface,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+          ),
+          child: SafeArea(
+            top: false,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const SizedBox(height: 45),
+                ListTile(
+                  leading: const Icon(Icons.videocam_outlined),
+                  title: const Text('批量下载视频'),
+                  subtitle: const Text('下载后合并为 MP4，保存到 Download/Zeitlind/Video'),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _enqueueSelected(setState, mode: 'video');
+                  },
+                ),
+                ListTile(
+                  leading: const Icon(Icons.audiotrack_outlined),
+                  title: const Text('批量下载音频'),
+                  subtitle: const Text('仅下载音轨并转写为 MP3，保存到 Download/Zeitlind/music'),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _enqueueSelected(setState, mode: 'audio');
+                  },
+                ),
+                const SizedBox(height: 8),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  /// 按 [mode]（video/audio）把勾选项加入批量下载队列
+  void _enqueueSelected(StateSetter setState, {required String mode}) {
+    if (_downloading || _selected.isEmpty) return;
     final List<int> sorted = _selected.toList()..sort();
     final List<Map<String, dynamic>> items = [];
     for (final index in sorted) {
       final dynamic episode = episodes[index];
-      final int? aid = episode.aid;
       final int? cidVal = episode.cid;
-      if (aid == null || cidVal == null) continue;
+      if (cidVal == null) continue;
+      final bool isPart = dataType == VideoEpidoesType.videoPart;
+      // 分P（Part）没有 aid/bvid/title 字段：动态调用会抛 NoSuchMethod，
+      // 必须按类型分支取值。
+      final String? itemBvid = isPart ? bvid : episode.bvid;
+      final int? aid = isPart
+          ? (itemBvid != null ? IdUtils.bv2av(itemBvid) : null)
+          : episode.aid;
+      if (aid == null) continue;
+      final String title = isPart
+          ? (episode.pagePart ?? '未命名')
+          : (episode.title ?? '未命名');
       items.add({
-        'bvid': episode.bvid ?? IdUtils.av2bv(aid),
+        'bvid': itemBvid ?? IdUtils.av2bv(aid),
         'cid': cidVal,
-        'title': episode.title ?? '未命名',
+        'title': title,
+        'mode': mode,
       });
     }
     if (items.isEmpty) return;
-    DownloadLogger.log('[batch] enqueue ${items.length} items');
+    DownloadLogger.log('[batch] enqueue ${items.length} items mode=$mode');
 
     _downloading = true;
     try {

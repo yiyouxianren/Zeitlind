@@ -34,11 +34,15 @@ class MediaDownloadPlan {
   /// worker 不再调用任何插件通道，见 downloadVideo 注释）
   final String tmpDirPath;
 
+  /// 纯音频计划：只下载音轨并转写 mp3，videoUrl 为空
+  final bool audioOnly;
+
   const MediaDownloadPlan({
     required this.videoUrl,
     required this.audioUrl,
     required this.dashDurationMs,
     this.tmpDirPath = '',
+    this.audioOnly = false,
   });
 }
 
@@ -395,6 +399,144 @@ class MediaDownloadService {
     return true;
   }
 
+  /// 主 isolate 预解析（纯音频）：查询 DASH、按设置选音轨，
+  /// 生成只含音轨地址的计划，供批量音频下载使用。
+  static Future<MediaDownloadPlan?> resolveAudioPlan({
+    required String bvid,
+    required int cid,
+    void Function(String msg)? toast,
+  }) async {
+    DownloadLogger.log('[resolveAudioPlan] begin bvid=$bvid cid=$cid');
+    if (!await _ensureStorageReady()) {
+      DownloadLogger.log('[resolveAudioPlan] ABORT: storage not ready');
+      toast?.call('存储权限未授权，无法下载');
+      return null;
+    }
+    final Dash? dash = await _queryDash(bvid: bvid, cid: cid);
+    if (dash == null) {
+      toast?.call('获取音频流失败');
+      return null;
+    }
+    final int preferred = GStrorage.setting
+        .get(SettingBoxKey.defaultAudioQa, defaultValue: 30280);
+    String audioRaw;
+    try {
+      audioRaw = selectAudioSource(dash, preferred);
+    } on StateError {
+      audioRaw = '';
+    }
+    if (audioRaw.isEmpty) {
+      toast?.call('该视频没有可用的音频流');
+      return null;
+    }
+    final Directory tmpDir = await _tempDir();
+    DownloadLogger.log('[resolveAudioPlan] done cid=$cid '
+        'audioHost=${Uri.tryParse(audioRaw)?.host}');
+    return MediaDownloadPlan(
+      videoUrl: '',
+      audioUrl: audioRaw,
+      dashDurationMs: dash.duration,
+      tmpDirPath: tmpDir.path,
+      audioOnly: true,
+    );
+  }
+
+  /// worker 侧：仅下载音轨到临时目录（纯 Dio，无插件通道）。
+  /// 返回 true 表示轨道已就绪，由主 isolate 负责转写 mp3。
+  static Future<bool> downloadAudioTrack({
+    required int cid,
+    required MediaDownloadPlan plan,
+    bool silent = false,
+    void Function(String msg)? onProgress,
+  }) {
+    DownloadLogger.log('[downloadAudioTrack] enter cid=$cid');
+    return _guard(() async {
+      void ui(String msg) {
+        if (silent) {
+          onProgress?.call(msg);
+        } else {
+          SmartDialog.showLoading(msg: msg);
+        }
+      }
+
+      final String url = plan.audioUrl ?? '';
+      if (url.isEmpty) return false;
+      final String tmpPath = plan.tmpDirPath.isNotEmpty
+          ? plan.tmpDirPath
+          : (await _tempDir()).path;
+      final String tmpSource = '$tmpPath/a_$cid.m4s';
+      ui('下载音频中 0%');
+      await _download(url, tmpSource, (received, total) {
+        if (silent) {
+          onProgress?.call(_progressText('下载音频中', received, total));
+        } else {
+          _progress('下载音频中', received, total);
+        }
+      });
+      DownloadLogger.log('[downloadAudioTrack] downloaded '
+          '${await File(tmpSource).length()}B cid=$cid');
+      return true;
+    }, silent: silent, tag: 'downloadAudioTrack');
+  }
+
+  /// 主 isolate：把已下载的音轨转写为 mp3（FFmpegKit 只能在主 isolate 用）。
+  static Future<bool> transcodeAudio({
+    required int cid,
+    required String title,
+    required MediaDownloadPlan plan,
+    bool silent = false,
+    void Function(String msg)? onProgress,
+  }) {
+    DownloadLogger.log('[transcodeAudio] enter cid=$cid title=$title');
+    return _guard(() async {
+      void ui(String msg) {
+        if (silent) {
+          onProgress?.call(msg);
+        } else {
+          SmartDialog.showLoading(msg: msg);
+        }
+      }
+
+      final String tmpPath = plan.tmpDirPath.isNotEmpty
+          ? plan.tmpDirPath
+          : (await _tempDir()).path;
+      final String tmpSource = '$tmpPath/a_$cid.m4s';
+      if (!await File(tmpSource).exists()) {
+        DownloadLogger.log('[transcodeAudio] ABORT: audio track missing $tmpSource');
+        if (!silent) SmartDialog.showToast('音频轨道缓存丢失，请重新下载');
+        return false;
+      }
+      await _ensureDir(_audioDir);
+      final String safeTitle = _sanitize(title);
+      final String outputPath = _prepareWritableOutput('$_audioDir/$safeTitle.mp3');
+      ui('转写 mp3 中');
+      final FFmpegSession session = await FFmpegKit.executeWithArguments([
+        '-y',
+        '-i',
+        tmpSource,
+        '-vn',
+        '-c:a',
+        'libmp3lame',
+        '-b:a',
+        '192k',
+        outputPath,
+      ]);
+      final bool ok = ReturnCode.isSuccess(await session.getReturnCode());
+      DownloadLogger.log('[transcodeAudio] ok=$ok cid=$cid');
+      await _cleanup([tmpSource]);
+      if (!ok) {
+        DownloadLogger.log('[transcodeAudio] ffmpeg tail: '
+            '${_tail(await session.getOutput())}');
+        if (!silent) SmartDialog.showToast('音频转写失败');
+        return false;
+      }
+      if (!silent) {
+        SmartDialog.showToast('已保存到 Download/Zeitlind/music/$safeTitle.mp3');
+      }
+      return true;
+    }, silent: silent, tag: 'transcodeAudio');
+  }
+
   /// 主 isolate 预解析：查询 DASH、选轨、读设置，生成可跨 isolate 传递的下载计划。
   /// 失败时返回 null 并给出用户提示。批量下载在入队时调用。
   static Future<MediaDownloadPlan?> resolvePlan({
@@ -527,6 +669,10 @@ class MediaDownloadService {
   /// 视频最终输出路径（批量服务看门狗据此检查 MP4 是否已生成）
   static String videoOutputPath(String title) =>
       '$_videoDir/${_sanitize(title)}.mp4';
+
+  /// 音频最终输出路径（批量音频下载看门狗据此检查 MP3 是否已生成）
+  static String audioOutputPath(String title) =>
+      '$_audioDir/${_sanitize(title)}.mp3';
 
   /// 正在（或等待）合并的 cid 集合：worker 下载下一个视频前的临时文件
   /// 迁移清理不得删除这些轨道——它们的主 isolate 合并可能尚未开始。
